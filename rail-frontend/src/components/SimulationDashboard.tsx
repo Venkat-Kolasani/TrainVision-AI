@@ -37,7 +37,7 @@ const SimulationDashboard: React.FC = () => {
   const [delayMinutes, setDelayMinutes] = useState<number>(15);
   const [selectedStation, setSelectedStation] = useState<string>('');
 
-  const API_BASE = "http://127.0.0.1:8000";
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   useEffect(() => {
     fetchInitialData();

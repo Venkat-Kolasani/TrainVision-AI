@@ -185,7 +185,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
 
   const fetchCurrentSystemData = async () => {
     try {
-      const API_BASE = "http://127.0.0.1:8000";
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
       // Fetch current schedule, trains, and conflicts
       const [scheduleRes, trainsRes, conflictsRes, logsRes] = await Promise.all([

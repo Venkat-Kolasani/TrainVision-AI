@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trainvision-backend-prod
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - FRONTEND_URL=${FRONTEND_URL}
+    volumes:
+      - ./backend/data:/app/data:ro
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ai/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./rail-frontend
+      dockerfile: Dockerfile
+    container_name: trainvision-frontend-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - VITE_API_BASE_URL=${BACKEND_URL}
+    depends_on:
+      - backend
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  default:
+    name: trainvision-prod-network

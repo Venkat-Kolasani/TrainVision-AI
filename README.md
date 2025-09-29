@@ -41,31 +41,64 @@ A comprehensive railway traffic management and optimization system with AI-power
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.8+
-- Node.js 16+
-- npm or yarn
+- Docker and Docker Compose (recommended)
+- OR Python 3.8+ and Node.js 16+ for manual setup
 
-### Backend Setup
+### 🐳 Docker Deployment (Recommended)
+
+#### Local Development
+```bash
+# Clone the repository
+git clone https://github.com/Venkat-Kolasani/TrainVision-AI.git
+cd TrainVision-AI
+
+# Run local deployment script
+./scripts/local-deploy.sh
+
+# Edit .env file with your Gemini API key
+# Get your key from: https://makersuite.google.com/app/apikey
+```
+
+#### Production Deployment
+```bash
+# Copy and configure production environment
+cp .env.production.example .env.production
+# Edit .env.production with your production values
+
+# Deploy to production
+./deploy.sh
+```
+
+### 🔧 Manual Setup (Alternative)
+
+#### Backend Setup
 ```bash
 cd backend
 pip install -r requirements.txt
 
-# Configure Gemini AI (optional but recommended)
+# Configure Gemini AI
 cp .env.example .env
-# Edit .env and add your Gemini API key from https://makersuite.google.com/app/apikey
+# Edit .env and add your Gemini API key
 
 python main.py
 ```
 
-### Frontend Setup
+#### Frontend Setup
 ```bash
 cd rail-frontend
 npm install
 npm run dev
 ```
 
-### Access the Application
-- **Main Application**: http://localhost:5173
+### 🌐 Access the Application
+
+#### Docker Deployment
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+
+#### Manual Setup
+- **Frontend**: http://localhost:5173
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 
@@ -234,6 +267,51 @@ TrainVision-AI-Decision-Support/
 3. Analyze delay patterns by station/train type
 4. Monitor conflict trends and resolution effectiveness
 5. Adjust optimizer settings as needed
+
+## 🚀 Production Deployment
+
+### Cloud Deployment Options
+
+#### 1. **Docker-based Deployment**
+The application is containerized and ready for deployment on:
+- **AWS ECS/Fargate**
+- **Google Cloud Run**
+- **Azure Container Instances**
+- **DigitalOcean App Platform**
+- **Heroku Container Registry**
+
+#### 2. **Kubernetes Deployment**
+```bash
+# Build and push images
+docker build -t your-registry/trainvision-backend ./backend
+docker build -t your-registry/trainvision-frontend ./rail-frontend
+
+# Deploy to Kubernetes
+kubectl apply -f k8s/
+```
+
+#### 3. **Environment Variables for Production**
+```bash
+# Required environment variables
+GEMINI_API_KEY=your_production_api_key
+GEMINI_MODEL=gemini-2.5-flash
+FRONTEND_URL=https://your-domain.com
+BACKEND_URL=https://api.your-domain.com
+```
+
+### 🔒 Security Considerations
+- ✅ CORS properly configured for production domains
+- ✅ Environment variables for sensitive data
+- ✅ Health checks implemented
+- ✅ Non-root user in Docker containers
+- ✅ Security headers in nginx configuration
+- ⚠️ Add HTTPS/SSL certificates for production
+- ⚠️ Consider adding authentication for production use
+
+### 📊 Monitoring & Logging
+- Health check endpoints: `/ai/status`
+- Application logs via Docker logs
+- Consider adding: Prometheus metrics, ELK stack, or cloud monitoring
 
 ## 🤝 Contributing
 

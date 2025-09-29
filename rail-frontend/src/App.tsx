@@ -59,7 +59,7 @@ interface LogEntry {
 // Use this file as the main App component in a React + Tailwind project (e.g. Vite + React)
 
 export default function App() {
-  const API_BASE = "http://127.0.0.1:8000";
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   const [trains, setTrains] = useState<Train[]>([]);
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);

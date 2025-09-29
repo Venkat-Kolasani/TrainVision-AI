@@ -22,11 +22,19 @@ app = FastAPI(title="Rail Optimizer API", version="0.1.0")
 
 from fastapi.middleware.cors import CORSMiddleware
 
+# Configure CORS for production
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Development
+    "http://localhost:3000",  # Alternative dev port
+    FRONTEND_URL,  # Production frontend URL
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 

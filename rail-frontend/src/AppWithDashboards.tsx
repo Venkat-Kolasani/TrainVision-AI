@@ -57,7 +57,7 @@ const AppWithDashboards: React.FC = () => {
   const [logs, setLogs] = useState<any[]>([]);
   const [lastAction, setLastAction] = useState<string | null>(null);
 
-  const API_BASE = "http://127.0.0.1:8000";
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   useEffect(() => {
     // Fetch all data periodically
