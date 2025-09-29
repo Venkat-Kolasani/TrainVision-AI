@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: trainvision-backend
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: "cd backend && pip install -r requirements-prod.txt"
+    startCommand: "cd backend && gunicorn --bind 0.0.0.0:$PORT --workers 2 --worker-class uvicorn.workers.UvicornWorker main:app"
+    healthCheckPath: "/ai/status"
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: FRONTEND_URL
+        sync: false

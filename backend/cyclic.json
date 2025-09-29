@@ -1,0 +1,9 @@
+{
+  "name": "trainvision-backend",
+  "runtime": "python3.9",
+  "build": "pip install -r requirements-prod.txt",
+  "start": "gunicorn --bind 0.0.0.0:$PORT --workers 1 --worker-class uvicorn.workers.UvicornWorker main:app",
+  "env": {
+    "GEMINI_MODEL": "gemini-2.5-flash"
+  }
+}
