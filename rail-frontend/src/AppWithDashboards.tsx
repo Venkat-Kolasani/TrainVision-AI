@@ -150,7 +150,10 @@ const AppWithDashboards: React.FC = () => {
     <div className="bg-slate-800 border-b border-slate-700 px-6 py-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-6">
-          <h1 className="text-xl font-bold text-white">🚂 TrainVision AI</h1>
+          <div className="flex items-center space-x-3">
+            <img src="/train-logo.png" alt="TrainVision AI" className="w-8 h-8" />
+            <h1 className="text-xl font-bold text-white">TrainVision AI</h1>
+          </div>
           <nav className="flex space-x-4">
             <button
               onClick={() => setCurrentView('main')}

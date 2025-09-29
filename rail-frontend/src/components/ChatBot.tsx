@@ -363,8 +363,8 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
     <div className="fixed bottom-4 right-4 w-96 bg-white rounded-lg shadow-xl flex flex-col" style={{ height: '600px' }}>
       <div className="bg-blue-600 text-white p-4 rounded-t-lg flex justify-between items-center">
         <div className="flex items-center space-x-2">
-          <Bot className="w-5 h-5" />
-          <h3 className="font-semibold">Rail Optimization Assistant</h3>
+          <img src="/train-logo.png" alt="TrainVision AI" className="w-5 h-5 filter brightness-0 invert" />
+          <h3 className="font-semibold">TrainVision AI Assistant</h3>
         </div>
         <button
           onClick={onClose}

@@ -1524,7 +1524,10 @@ export default function App() {
     <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
         <header className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-semibold">🚂 TrainVision AI Decision Support</h1>
+          <div className="flex items-center space-x-3">
+            <img src="/train-logo.png" alt="TrainVision AI" className="w-10 h-10" />
+            <h1 className="text-2xl font-semibold">TrainVision AI Decision Support</h1>
+          </div>
           <div className="flex items-center gap-4">
             <button 
               onClick={() => {
