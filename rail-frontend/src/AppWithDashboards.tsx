@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Home, 
-  BarChart3, 
-  Play, 
-  Bot, 
+import {
+  Home,
+  BarChart3,
+  Play,
+  Bot,
   AlertTriangle,
   Lightbulb
 } from 'lucide-react';
@@ -51,7 +51,7 @@ const AppWithDashboards: React.FC = () => {
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [showRecommendationsPanel, setShowRecommendationsPanel] = useState(false);
-  
+
   // Add state for ChatBot data
   const [scheduleData, setScheduleData] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
@@ -157,33 +157,30 @@ const AppWithDashboards: React.FC = () => {
           <nav className="flex space-x-4">
             <button
               onClick={() => setCurrentView('main')}
-              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${
-                currentView === 'main' 
-                  ? 'bg-blue-600 text-white' 
-                  : 'text-slate-300 hover:text-white hover:bg-slate-700'
-              }`}
+              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${currentView === 'main'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
             >
               <Home className="w-4 h-4" />
               Main Dashboard
             </button>
             <button
               onClick={() => setCurrentView('simulation')}
-              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${
-                currentView === 'simulation' 
-                  ? 'bg-blue-600 text-white' 
-                  : 'text-slate-300 hover:text-white hover:bg-slate-700'
-              }`}
+              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${currentView === 'simulation'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
             >
               <Play className="w-4 h-4" />
               Simulation
             </button>
             <button
               onClick={() => setCurrentView('analytics')}
-              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${
-                currentView === 'analytics' 
-                  ? 'bg-blue-600 text-white' 
-                  : 'text-slate-300 hover:text-white hover:bg-slate-700'
-              }`}
+              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${currentView === 'analytics'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
             >
               <BarChart3 className="w-4 h-4" />
               Analytics
@@ -241,7 +238,7 @@ const AppWithDashboards: React.FC = () => {
 
       {/* Enhanced ChatBot */}
       {showChatBot && (
-        <ChatBot 
+        <ChatBot
           onClose={() => setShowChatBot(false)}
           logsBefore={logs}
           logsAfter={logs}
@@ -295,7 +292,7 @@ const AppWithDashboards: React.FC = () => {
                     <div className="bg-slate-600 rounded p-2">
                       <div className="text-xs text-slate-400">Impact</div>
                       <div className="text-sm">
-                        {rec.impact.affected_trains.length} trains • 
+                        {rec.impact.affected_trains.length} trains •
                         {rec.impact.total_delay_change > 0 ? '+' : ''}{rec.impact.total_delay_change.toFixed(1)}min
                       </div>
                     </div>
