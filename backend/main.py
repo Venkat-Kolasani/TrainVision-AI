@@ -11,6 +11,12 @@ from recommendations import generate_recommendations
 import copy
 import threading
 import time
+import os
+from dotenv import load_dotenv
+import google.generativeai as genai
+
+# Load environment variables
+load_dotenv()
 
 app = FastAPI(title="Rail Optimizer API", version="0.1.0")
 
@@ -23,6 +29,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Configure Gemini AI
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel(GEMINI_MODEL)
+else:
+    gemini_model = None
+    print("Warning: GEMINI_API_KEY not found in environment variables")
 
 # Load dataset
 with open("data/prototype_trains.json") as f:
@@ -1464,6 +1481,56 @@ def get_analytics_summary():
         "active_delays": len(active_delays),
         "optimizer_mode": optimizer_settings.mode,
         "last_updated": datetime.now().isoformat()
+    }
+
+# Gemini AI Integration Endpoints
+@app.post("/ai/analyze-schedule")
+async def analyze_schedule_with_ai(query: str = "Analyze the current train schedule and provide optimization suggestions"):
+    """Use Gemini AI to analyze the current schedule and provide insights"""
+    if not gemini_model:
+        raise HTTPException(status_code=503, detail="Gemini AI not configured. Please set GEMINI_API_KEY in .env file")
+    
+    try:
+        # Prepare schedule data for AI analysis
+        schedule_summary = {
+            "total_trains": len(trains),
+            "total_conflicts": len(current_conflicts),
+            "stations": list(stations.keys()),
+            "current_recommendations": len(current_recommendations)
+        }
+        
+        prompt = f"""
+        You are an AI assistant for a railway traffic management system. 
+        
+        Current Schedule Summary:
+        - Total Trains: {schedule_summary['total_trains']}
+        - Active Conflicts: {schedule_summary['total_conflicts']}
+        - Stations: {', '.join(schedule_summary['stations'])}
+        - Pending Recommendations: {schedule_summary['current_recommendations']}
+        
+        User Query: {query}
+        
+        Please provide actionable insights and recommendations for optimizing the railway schedule.
+        """
+        
+        response = gemini_model.generate_content(prompt)
+        
+        return {
+            "ai_response": response.text,
+            "schedule_summary": schedule_summary,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
+
+@app.get("/ai/status")
+def get_ai_status():
+    """Check if Gemini AI is properly configured"""
+    return {
+        "gemini_configured": gemini_model is not None,
+        "model": GEMINI_MODEL if gemini_model else None,
+        "api_key_set": bool(GEMINI_API_KEY)
     }
 
 

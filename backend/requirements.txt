@@ -4,3 +4,5 @@ pydantic
 pulp>=2.7.0
 ortools>=9.5.0
 numpy>=1.21.0
+google-generativeai>=0.3.0
+python-dotenv>=1.0.0

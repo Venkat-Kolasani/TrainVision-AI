@@ -49,6 +49,11 @@ A comprehensive railway traffic management and optimization system with AI-power
 ```bash
 cd backend
 pip install -r requirements.txt
+
+# Configure Gemini AI (optional but recommended)
+cp .env.example .env
+# Edit .env and add your Gemini API key from https://makersuite.google.com/app/apikey
+
 python main.py
 ```
 
@@ -116,6 +121,10 @@ npm run dev
 - `GET /train-positions` - Current train positions
 - `GET /track-status` - Track occupancy and conflicts
 
+### AI Integration (Gemini)
+- `POST /ai/analyze-schedule` - AI-powered schedule analysis and optimization suggestions
+- `GET /ai/status` - Check Gemini AI configuration status
+
 ## 🤖 AI Features
 
 ### Conflict Detection
@@ -135,6 +144,12 @@ npm run dev
 - **Optimization Opportunities**: Proactive recommendations for schedule improvement
 - **Cost-Benefit Analysis**: Scoring system based on delay reduction and conflict resolution
 - **Impact Prediction**: Forecasts effects of recommended actions
+
+### Gemini AI Integration
+- **Schedule Analysis**: AI-powered analysis of current train schedules using Google's Gemini 1.5 Flash model
+- **Optimization Suggestions**: Natural language recommendations for improving railway operations
+- **Interactive Queries**: Ask specific questions about schedule optimization and get AI-powered insights
+- **Real-time Insights**: Contextual analysis based on current system state and conflicts
 
 ## 🔬 Optimization Algorithms
 
