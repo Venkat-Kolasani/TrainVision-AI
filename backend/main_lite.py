@@ -23,7 +23,8 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000", 
-    "https://trainvision-ai.vercel.app",  # Add your frontend URL here
+    "https://trainvision.vercel.app",  # Your live frontend URL
+    "https://trainvision-ai.vercel.app",  # Alternative URL
     FRONTEND_URL,
 ]
 
