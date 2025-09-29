@@ -34,7 +34,7 @@ interface ChatBotProps {
 export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoExplain, onClose, onAutoExplanationComplete }: ChatBotProps) {
   const [messages, setMessages] = useState<Message[]>([{
     id: '1',
-    text: 'Hello! I\'m your Rail Optimization Assistant. I can help you understand the optimization results and compare the schedule changes. What would you like to know?',
+    text: '👋 Hi there! I\'m your Railway Operations Assistant. \n\nI can help you understand:\n🚂 What happened with recent train schedule changes\n🔧 Why the system made certain optimization decisions\n📊 How conflicts were resolved\n🚉 What\'s happening at specific stations\n\nJust ask me anything about your railway operations - I\'ll explain it in simple terms!',
     sender: 'bot',
     timestamp: new Date()
   }]);
@@ -56,15 +56,15 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
       setHasAutoExplained(true);
       
       // Generate automatic explanation
-      const autoExplanationPrompt = `Please explain what just happened: ${lastAction}. 
+      const autoExplanationPrompt = `Something just happened in the railway system: ${lastAction}
       
-      Analyze the recent logs and schedule changes to provide a clear explanation of:
-      1. What action was taken
-      2. Why it was approved or rejected
-      3. What impact it had on the system
-      4. Any conflicts that were resolved
+      Please explain this in a friendly, easy-to-understand way. I want to know:
+      - What exactly happened?
+      - Was this a good thing or did something go wrong?
+      - How does this affect train operations?
+      - Should I be concerned about anything?
       
-      Keep the explanation concise but informative.`;
+      Explain it like you're talking to someone who manages the station but isn't a technical expert.`;
       
       // Add auto-explanation request
       const autoMessage: Message = {
@@ -91,23 +91,25 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
       }
 
       // Prepare the prompt with context
-      const contextualPrompt = `You are an AI assistant for a train scheduling system. 
-      The user wants to understand: "${prompt}" 
+      const contextualPrompt = `You are a friendly railway operations expert helping someone understand what just happened in their train scheduling system. 
+
+      The user wants to understand: "${prompt}"
       
-      Context:
+      Here's what happened:
       - Recent action: ${lastAction}
       - Schedule data: ${JSON.stringify(scheduleData || 'No schedule data available')}
       - Recent logs: ${JSON.stringify(logsAfter?.slice(-5) || 'No logs available')}
       
-      Please provide a clear, concise explanation of what happened and why. Focus on:
-      1. The specific action taken
-      2. Whether it was successful or rejected and why
-      3. Any system optimizations or conflict resolutions
-      4. Impact on train schedules and delays
+      Please explain this in a conversational, easy-to-understand way as if you're talking to someone who isn't a technical expert. Focus on:
       
-      Use simple language and bullet points where helpful.`;
+      🚂 **What happened?** - Describe the action in simple terms
+      ✅ **Was it successful?** - Did it work as intended or was there an issue?
+      🔧 **Why did the system do this?** - Explain the reasoning behind any optimizations
+      📊 **What's the impact?** - How does this affect train schedules, delays, or passengers?
+      
+      Use friendly language, emojis where appropriate, and avoid technical jargon. Think of explaining this to a station manager who needs to understand the practical implications.`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -209,18 +211,29 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
       }
 
       // Prepare the prompt with context
-      const prompt = `You are an AI assistant for a train scheduling system. 
-      The user has asked: "${userInput}" 
+      const prompt = `You are a friendly railway operations expert helping someone understand their train scheduling system. 
+
+      The user asked: "${userInput}"
       
-      Context:
+      Current situation:
       - Recent action: ${lastAction || 'No recent actions'}
       - Schedule data: ${JSON.stringify(scheduleData || 'No schedule data available')}
-      - Logs before optimization: ${JSON.stringify(logsBefore?.slice(-3) || 'No logs available')}
-      - Logs after optimization: ${JSON.stringify(logsAfter?.slice(-3) || 'No logs available')}
+      - What happened before: ${JSON.stringify(logsBefore?.slice(-3) || 'No previous logs')}
+      - What happened after: ${JSON.stringify(logsAfter?.slice(-3) || 'No recent logs')}
       
-      Please provide a helpful response based on the available data. If the user is asking about recent changes, focus on explaining the optimization decisions and conflict resolutions.`;
+      Please respond in a conversational, helpful way. Use these guidelines:
+      
+      🎯 **Be conversational** - Talk like you're explaining to a colleague, not writing a technical manual
+      🚂 **Use railway context** - Reference trains, stations, platforms, and schedules in relatable terms
+      📊 **Explain the "why"** - When discussing optimizations, explain the reasoning in practical terms
+      💡 **Give actionable insights** - Help them understand what they can do or what to expect next
+      🔍 **Break down complex concepts** - If discussing conflicts or optimizations, use simple analogies
+      
+      If they're asking about specific stations (like HYB, SC, KCG), explain what's happening there in terms of train movements, platform assignments, and any scheduling decisions.
+      
+      Avoid technical jargon and focus on the practical impact on train operations and passenger experience.`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -370,7 +383,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-2 text-center">
-          Powered by Gemini AI. Responses may take a moment.
+          Powered by Gemini AI • Try asking: "Explain what happened at HYB station" or "Why was this train moved?"
         </p>
       </div>
     </div>

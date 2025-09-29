@@ -146,7 +146,7 @@ npm run dev
 - **Impact Prediction**: Forecasts effects of recommended actions
 
 ### Gemini AI Integration
-- **Schedule Analysis**: AI-powered analysis of current train schedules using Google's Gemini 1.5 Flash model
+- **Schedule Analysis**: AI-powered analysis of current train schedules using Google's Gemini 2.5 Flash model
 - **Optimization Suggestions**: Natural language recommendations for improving railway operations
 - **Interactive Queries**: Ask specific questions about schedule optimization and get AI-powered insights
 - **Real-time Insights**: Contextual analysis based on current system state and conflicts
