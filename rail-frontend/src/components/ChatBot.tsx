@@ -54,7 +54,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
   useEffect(() => {
     if (autoExplain && lastAction && !hasAutoExplained) {
       setHasAutoExplained(true);
-      
+
       // Generate automatic explanation
       const autoExplanationPrompt = `Something just happened in the railway system: ${lastAction}
       
@@ -65,7 +65,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
       - Should I be concerned about anything?
       
       Explain it like you're talking to someone who manages the station but isn't a technical expert.`;
-      
+
       // Add auto-explanation request
       const autoMessage: Message = {
         id: Date.now().toString(),
@@ -73,9 +73,9 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
         sender: 'user',
         timestamp: new Date()
       };
-      
+
       setMessages(prev => [...prev, autoMessage]);
-      
+
       // Trigger AI response
       handleAutoExplanation(autoExplanationPrompt);
     }
@@ -83,31 +83,26 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
 
   const handleAutoExplanation = async (prompt: string) => {
     setIsLoading(true);
-    
+
     try {
       const apiKey = 'AIzaSyBuLZBgvKK9a1q1S_ggpSOeQ2D10wWaPdM';
       if (!apiKey) {
         throw new Error('API key is not configured');
       }
 
-      // Prepare the prompt with context
-      const contextualPrompt = `You are a friendly railway operations expert helping someone understand what just happened in their train scheduling system. 
+      // Prepare a concise auto-explanation prompt
+      const contextualPrompt = `Explain what just happened in the railway system in simple terms.
 
-      The user wants to understand: "${prompt}"
+      Recent Action: ${lastAction}
+      Current Data: ${JSON.stringify(scheduleData?.schedule?.slice(0, 2) || 'No data')}
       
-      Here's what happened:
-      - Recent action: ${lastAction}
-      - Schedule data: ${JSON.stringify(scheduleData || 'No schedule data available')}
-      - Recent logs: ${JSON.stringify(logsAfter?.slice(-5) || 'No logs available')}
+      Keep explanation under 100 words. Focus on:
+      - What specific action occurred
+      - Which trains/stations were affected  
+      - Why the system made this decision
+      - Current impact on operations
       
-      Please explain this in a conversational, easy-to-understand way as if you're talking to someone who isn't a technical expert. Focus on:
-      
-      🚂 **What happened?** - Describe the action in simple terms
-      ✅ **Was it successful?** - Did it work as intended or was there an issue?
-      🔧 **Why did the system do this?** - Explain the reasoning behind any optimizations
-      📊 **What's the impact?** - How does this affect train schedules, delays, or passengers?
-      
-      Use friendly language, emojis where appropriate, and avoid technical jargon. Think of explaining this to a station manager who needs to understand the practical implications.`;
+      Use simple language and reference specific train IDs and stations from the data.`;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
@@ -153,10 +148,10 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
         console.error('API Error:', errorData);
         throw new Error(errorData.error?.message || 'Failed to get response from AI');
       }
-      
+
       const data = await response.json();
-      const botResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || 
-                         'I apologize, but I was unable to process the explanation request. Please try asking me directly about what happened.';
+      const botResponse = data.candidates?.[0]?.content?.parts?.[0]?.text ||
+        'I apologize, but I was unable to process the explanation request. Please try asking me directly about what happened.';
 
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
@@ -164,7 +159,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
         sender: 'bot',
         timestamp: new Date()
       }]);
-      
+
       // Notify parent that auto-explanation is complete
       if (onAutoExplanationComplete) {
         onAutoExplanationComplete();
@@ -172,7 +167,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
     } catch (error) {
       console.error('Error in auto-explanation:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      
+
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         text: `I'm sorry, I encountered an error while generating the explanation: ${errorMessage}. Please feel free to ask me directly about what happened.`,
@@ -186,6 +181,35 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const fetchCurrentSystemData = async () => {
+    try {
+      const API_BASE = "http://127.0.0.1:8000";
+
+      // Fetch current schedule, trains, and conflicts
+      const [scheduleRes, trainsRes, conflictsRes, logsRes] = await Promise.all([
+        fetch(`${API_BASE}/schedule`),
+        fetch(`${API_BASE}/trains`),
+        fetch(`${API_BASE}/conflicts`),
+        fetch(`${API_BASE}/log`)  // Note: singular 'log', not 'logs'
+      ]);
+
+      const currentSchedule = scheduleRes.ok ? await scheduleRes.json() : null;
+      const currentTrains = trainsRes.ok ? await trainsRes.json() : null;
+      const currentConflicts = conflictsRes.ok ? await conflictsRes.json() : null;
+      const currentLogs = logsRes.ok ? await logsRes.json() : null;
+
+      return {
+        schedule: currentSchedule,
+        trains: currentTrains,
+        conflicts: currentConflicts,
+        logs: currentLogs
+      };
+    } catch (error) {
+      console.error('Error fetching current system data:', error);
+      return null;
+    }
   };
 
   const handleSend = useCallback(async () => {
@@ -210,28 +234,45 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
         throw new Error('API key is not configured');
       }
 
-      // Prepare the prompt with context
-      const prompt = `You are a friendly railway operations expert helping someone understand their train scheduling system. 
+      // Fetch current system data if we don't have enough context
+      let currentData = null;
+      if (!scheduleData || !logsBefore?.length) {
+        currentData = await fetchCurrentSystemData();
+      }
 
-      The user asked: "${userInput}"
+      // Prepare a more concise prompt to avoid token limits
+      const scheduleInfo = currentData?.schedule || scheduleData;
+      const trainsInfo = currentData?.trains;
+      const conflictsInfo = currentData?.conflicts;
+
+      // Create a summary instead of full JSON to avoid token limits
+      const systemSummary = {
+        totalTrains: trainsInfo?.length || (Array.isArray(trainsInfo) ? trainsInfo.length : 'Unknown'),
+        activeConflicts: conflictsInfo?.conflicts?.length || conflictsInfo?.length || 0,
+        scheduledTrains: scheduleInfo?.schedule?.length || 0,
+        stations: ['HYB', 'SC', 'KCG'] // Known stations
+      };
+
+      const prompt = `You are a railway operations assistant. Answer the user's question about the current dashboard data.
+
+      User Question: "${userInput}"
       
-      Current situation:
-      - Recent action: ${lastAction || 'No recent actions'}
-      - Schedule data: ${JSON.stringify(scheduleData || 'No schedule data available')}
-      - What happened before: ${JSON.stringify(logsBefore?.slice(-3) || 'No previous logs')}
-      - What happened after: ${JSON.stringify(logsAfter?.slice(-3) || 'No recent logs')}
+      CURRENT DASHBOARD DATA:
+      - Trains: ${systemSummary.totalTrains} active trains
+      - Conflicts: ${systemSummary.activeConflicts} current conflicts  
+      - Stations: ${systemSummary.stations.join(', ')}
+      - Recent Action: ${lastAction || 'No recent actions'}
       
-      Please respond in a conversational, helpful way. Use these guidelines:
+      Key Train Details: ${trainsInfo ? JSON.stringify(trainsInfo.slice(0, 3)) : 'No data'}
+      Current Schedule: ${scheduleInfo?.schedule ? JSON.stringify(scheduleInfo.schedule.slice(0, 3)) : 'No data'}
       
-      🎯 **Be conversational** - Talk like you're explaining to a colleague, not writing a technical manual
-      🚂 **Use railway context** - Reference trains, stations, platforms, and schedules in relatable terms
-      📊 **Explain the "why"** - When discussing optimizations, explain the reasoning in practical terms
-      💡 **Give actionable insights** - Help them understand what they can do or what to expect next
-      🔍 **Break down complex concepts** - If discussing conflicts or optimizations, use simple analogies
-      
-      If they're asking about specific stations (like HYB, SC, KCG), explain what's happening there in terms of train movements, platform assignments, and any scheduling decisions.
-      
-      Avoid technical jargon and focus on the practical impact on train operations and passenger experience.`;
+      INSTRUCTIONS:
+      - Keep response under 150 words
+      - Focus ONLY on what's currently shown in the dashboard
+      - Reference specific trains (T101, T104, etc.) and stations (HYB, SC, KCG) from the data
+      - Explain in simple, practical terms
+      - If asked about optimization, explain what the system is currently doing with the visible data
+      - Don't give general explanations - stick to the actual current data`;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
@@ -275,12 +316,18 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
       if (!response.ok) {
         const errorData = await response.json();
         console.error('API Error:', errorData);
-        throw new Error(errorData.error?.message || 'Failed to get response from AI');
+        throw new Error(errorData.error?.message || `API Error: ${response.status} ${response.statusText}`);
       }
-      
+
       const data = await response.json();
-      const botResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || 
-                         'I apologize, but I was unable to process your request. Please try again.';
+      console.log('Gemini Response:', data); // Debug log
+
+      const botResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!botResponse) {
+        console.error('No response text from Gemini:', data);
+        throw new Error('Gemini returned an empty response. This might be due to content filtering or API limits.');
+      }
 
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
@@ -291,7 +338,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
     } catch (error) {
       console.error('Error in chat:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      
+
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         text: `I'm sorry, I encountered an error: ${errorMessage}. Please try again.`,
@@ -330,16 +377,15 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages?.map((message) => (
-          <div 
-            key={message.id} 
+          <div
+            key={message.id}
             className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
           >
-            <div 
-              className={`max-w-[80%] rounded-lg p-3 ${
-                message.sender === 'user' 
-                  ? 'bg-blue-100 text-blue-900' 
-                  : 'bg-gray-100 text-gray-800'
-              }`}
+            <div
+              className={`max-w-[80%] rounded-lg p-3 ${message.sender === 'user'
+                ? 'bg-blue-100 text-blue-900'
+                : 'bg-gray-100 text-gray-800'
+                }`}
             >
               <p className="whitespace-pre-line">{message.text}</p>
               <p className="text-xs text-gray-500 mt-1">
@@ -361,7 +407,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
         )}
         <div ref={messagesEndRef} />
       </div>
-      
+
       <div className="p-4 border-t">
         <div className="flex items-end space-x-2">
           <textarea

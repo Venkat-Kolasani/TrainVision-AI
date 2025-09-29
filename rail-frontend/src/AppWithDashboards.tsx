@@ -51,18 +51,28 @@ const AppWithDashboards: React.FC = () => {
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [showRecommendationsPanel, setShowRecommendationsPanel] = useState(false);
+  
+  // Add state for ChatBot data
+  const [scheduleData, setScheduleData] = useState<any>(null);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [lastAction, setLastAction] = useState<string | null>(null);
 
   const API_BASE = "http://127.0.0.1:8000";
 
   useEffect(() => {
-    // Fetch conflicts and recommendations periodically
+    // Fetch all data periodically
     const interval = setInterval(() => {
       fetchConflicts();
       fetchRecommendations();
+      fetchScheduleData();
+      fetchLogs();
     }, 10000); // Every 10 seconds
 
+    // Initial fetch
     fetchConflicts();
     fetchRecommendations();
+    fetchScheduleData();
+    fetchLogs();
 
     return () => clearInterval(interval);
   }, []);
@@ -88,6 +98,30 @@ const AppWithDashboards: React.FC = () => {
       }
     } catch (error) {
       console.error('Error fetching recommendations:', error);
+    }
+  };
+
+  const fetchScheduleData = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/schedule`);
+      if (response.ok) {
+        const data = await response.json();
+        setScheduleData(data);
+      }
+    } catch (error) {
+      console.error('Error fetching schedule data:', error);
+    }
+  };
+
+  const fetchLogs = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/log`);  // Note: singular 'log'
+      if (response.ok) {
+        const data = await response.json();
+        setLogs(data);
+      }
+    } catch (error) {
+      console.error('Error fetching logs:', error);
     }
   };
 
@@ -206,8 +240,11 @@ const AppWithDashboards: React.FC = () => {
       {showChatBot && (
         <ChatBot 
           onClose={() => setShowChatBot(false)}
-          logsBefore={[]}
-          logsAfter={[]}
+          logsBefore={logs}
+          logsAfter={logs}
+          scheduleData={scheduleData}
+          lastAction={lastAction}
+          autoExplain={false}
         />
       )}
 
