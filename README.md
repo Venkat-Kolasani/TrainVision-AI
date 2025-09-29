@@ -1,0 +1,238 @@
+# 🚂 TrainVision AI Decision Support System
+
+A comprehensive railway traffic management and optimization system with AI-powered decision support capabilities, featuring advanced conflict detection, feasibility analysis, and intelligent recommendations.
+
+## ✨ Features
+
+### Core Functionality
+- **Real-time Train Scheduling**: Dynamic optimization using both Greedy and ILP algorithms
+- **Interactive Dashboard**: Live visualization of train movements, station status, and system metrics
+- **Override Management**: Manual override capabilities with comprehensive impact analysis
+- **Conflict Detection**: Advanced conflict detection with detailed explanations and severity assessment
+- **Feasibility Analysis**: Pre-override feasibility checking with safety scoring and alternatives
+- **AI Recommendations**: Intelligent suggestions for schedule optimization and conflict resolution
+
+### Advanced Features
+- **Scenario Simulation**: What-if analysis for delays, breakdowns, weather, and priority changes
+- **Analytics Dashboard**: Comprehensive performance metrics and system insights
+- **ILP Optimization**: Integer Linear Programming for optimal scheduling (using PuLP/OR-Tools)
+- **Real-time Updates**: WebSocket-based live train position tracking
+- **Audit Logging**: Complete audit trail of all system actions and decisions
+
+### User Interface
+- **Multi-Dashboard Architecture**: Separate dashboards for operations, simulation, and analytics
+- **Conflict Visualization**: Real-time conflict indicators with detailed explanations
+- **Recommendations Panel**: AI-powered actionable recommendations with impact scoring
+- **Interactive Maps**: Enhanced railway network visualization with real-time train positions
+
+## 🏗️ Architecture
+
+- **Backend**: FastAPI-based REST API with WebSocket support
+- **Frontend**: React + TypeScript with Tailwind CSS and multi-dashboard architecture
+- **Optimization**: 
+  - Greedy algorithm with conflict resolution
+  - ILP optimization using PuLP and OR-Tools
+- **AI Features**: 
+  - Conflict detection engine
+  - Feasibility analysis system
+  - Intelligent recommendations engine
+- **Data**: JSON-based train and station datasets with realistic constraints
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.8+
+- Node.js 16+
+- npm or yarn
+
+### Backend Setup
+```bash
+cd backend
+pip install -r requirements.txt
+python main.py
+```
+
+### Frontend Setup
+```bash
+cd rail-frontend
+npm install
+npm run dev
+```
+
+### Access the Application
+- **Main Application**: http://localhost:5173
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+
+## 📊 Dashboard Overview
+
+### 1. Main Dashboard
+- Real-time train scheduling and visualization
+- Manual override capabilities with feasibility checking
+- Live conflict detection and resolution
+- Interactive railway network map
+
+### 2. Simulation Dashboard
+- Scenario testing (delays, breakdowns, weather, priority changes)
+- Before/after impact analysis
+- Recommended actions for each scenario
+- Scenario history and comparison
+
+### 3. Analytics Dashboard
+- System performance metrics and KPIs
+- Delay analysis by station and train type
+- Platform utilization statistics
+- Conflict analysis and trends
+- Optimizer settings configuration
+
+## 🔧 API Endpoints
+
+### Core Operations
+- `GET /trains` - Get all trains
+- `GET /schedule` - Get optimized schedule with conflicts
+- `POST /override` - Apply manual override
+- `GET /stations` - Get station information
+
+### Advanced Features
+- `POST /feasibility` - Check override feasibility
+- `GET /conflicts` - Get current conflicts with explanations
+- `GET /recommendations` - Get AI recommendations
+- `POST /apply-recommendation` - Apply a specific recommendation
+
+### Simulation
+- `POST /simulate/delay` - Simulate delay scenario
+- `POST /simulate/breakdown` - Simulate breakdown scenario
+- `POST /simulate/weather` - Simulate weather impact
+- `POST /simulate/priority` - Simulate priority changes
+- `GET /scenarios` - Get simulation history
+
+### Analytics & Settings
+- `GET /analytics/summary` - Get comprehensive analytics
+- `GET /settings/optimizer` - Get optimizer settings
+- `POST /settings/optimizer` - Update optimizer settings
+
+### Real-time Features
+- `WebSocket /ws` - Real-time train positions and updates
+- `GET /train-positions` - Current train positions
+- `GET /track-status` - Track occupancy and conflicts
+
+## 🤖 AI Features
+
+### Conflict Detection
+- **Platform Overlap**: Detects trains assigned to same platform with overlapping times
+- **Headway Violations**: Identifies insufficient time between consecutive trains
+- **Priority Conflicts**: Flags cases where lower priority trains precede higher priority ones
+- **Severity Assessment**: Categorizes conflicts as low, medium, high, or critical
+
+### Feasibility Analysis
+- **Safety Scoring**: Evaluates safety implications of proposed overrides
+- **Impact Assessment**: Quantifies effects on delays and affected trains
+- **Alternative Generation**: Suggests better platform assignments
+- **Risk Analysis**: Provides detailed reasoning for approval/rejection
+
+### Intelligent Recommendations
+- **Conflict Resolution**: Automated suggestions to resolve detected conflicts
+- **Optimization Opportunities**: Proactive recommendations for schedule improvement
+- **Cost-Benefit Analysis**: Scoring system based on delay reduction and conflict resolution
+- **Impact Prediction**: Forecasts effects of recommended actions
+
+## 🔬 Optimization Algorithms
+
+### Greedy Algorithm (Default)
+- Fast execution suitable for real-time operations
+- Conflict-aware assignment with priority consideration
+- Handles delays and manual overrides effectively
+
+### ILP Optimization (Advanced)
+- Optimal solutions using Integer Linear Programming
+- Configurable objectives (minimize delays, conflicts, or balanced)
+- Adjustable time limits for computation
+- Handles complex constraint scenarios
+
+## 📈 Performance Metrics
+
+The system tracks and displays:
+- **On-time Performance**: Percentage of trains arriving within 2 minutes of schedule
+- **Average Delays**: Mean delay across all trains
+- **Conflict Statistics**: Count and severity of scheduling conflicts
+- **Platform Utilization**: Usage statistics for each platform
+- **System Efficiency**: Overall optimization effectiveness
+
+## 🗃️ Dataset
+
+The system uses a realistic dataset featuring:
+- **Stations**: Hyderabad network (HYB, SC, KCG) with varying platform counts
+- **Train Types**: Express, Local, Intercity, and Freight with different priorities
+- **Realistic Constraints**: Platform preferences, dwell times, and operational rules
+- **Dynamic Scenarios**: Support for delays, breakdowns, and priority changes
+
+## 🛠️ Development
+
+### Project Structure
+```
+TrainVision-AI-Decision-Support/
+├── backend/
+│   ├── main.py                 # Main FastAPI application
+│   ├── models.py              # Data models and schemas
+│   ├── optimizer.py           # Greedy optimization algorithms
+│   ├── ilp_optimizer.py       # ILP optimization engine
+│   ├── conflict_detector.py   # Conflict detection system
+│   ├── recommendations.py     # AI recommendations engine
+│   └── requirements.txt       # Python dependencies
+├── rail-frontend/
+│   ├── src/
+│   │   ├── App.tsx            # Original main dashboard
+│   │   ├── AppWithDashboards.tsx  # Multi-dashboard wrapper
+│   │   └── components/
+│   │       ├── SimulationDashboard.tsx
+│   │       ├── AnalyticsDashboard.tsx
+│   │       └── ChatBot.tsx
+│   └── package.json           # Node.js dependencies
+└── README.md
+```
+
+### Key Technologies
+- **Backend**: FastAPI, Pydantic, WebSockets, PuLP, OR-Tools
+- **Frontend**: React, TypeScript, Tailwind CSS, Lucide React
+- **Optimization**: Linear Programming, Constraint Satisfaction
+- **Real-time**: WebSocket communication, Live updates
+
+## 🚦 Usage Examples
+
+### Running a Simulation
+1. Navigate to the Simulation Dashboard
+2. Select scenario type (delay, breakdown, weather, priority)
+3. Choose affected train(s) and parameters
+4. Run simulation to see predicted impact
+5. Review recommendations and apply if needed
+
+### Applying Manual Overrides
+1. In the Main Dashboard, select a train
+2. Choose new platform assignment
+3. System automatically checks feasibility
+4. Review safety score and impact analysis
+5. Apply override if acceptable or choose alternatives
+
+### Monitoring System Performance
+1. Access the Analytics Dashboard
+2. Review KPIs and performance metrics
+3. Analyze delay patterns by station/train type
+4. Monitor conflict trends and resolution effectiveness
+5. Adjust optimizer settings as needed
+
+## 🤝 Contributing
+
+This system demonstrates advanced railway optimization concepts and can be extended with:
+- Additional optimization algorithms
+- More sophisticated AI models
+- Integration with real railway systems
+- Enhanced visualization capabilities
+- Mobile applications for field operations
+
+## 📄 License
+
+This project is a demonstration system for educational and research purposes.
+
+---
+
+**TrainVision AI** - Intelligent Railway Traffic Management System

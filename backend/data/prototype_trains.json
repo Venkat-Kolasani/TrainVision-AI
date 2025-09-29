@@ -1,0 +1,69 @@
+{
+  "stations": [
+    { "id": "HYB", "platforms": 3 },
+    { "id": "SC", "platforms": 4 },
+    { "id": "KCG", "platforms": 2 }
+  ],
+  "trains": [
+    {
+      "id": "T101",
+      "type": "Express",
+      "priority": 8,
+      "origin": "HYB",
+      "destination": "SC",
+      "scheduled_arrival": "2025-09-22T09:00:00",
+      "scheduled_departure": "2025-09-22T09:15:00",
+      "platform_pref": 1
+    },
+    {
+      "id": "T102",
+      "type": "Local",
+      "priority": 5,
+      "origin": "SC",
+      "destination": "KCG",
+      "scheduled_arrival": "2025-09-22T09:10:00",
+      "scheduled_departure": "2025-09-22T09:25:00",
+      "platform_pref": 1
+    },
+    {
+      "id": "T103",
+      "type": "Passenger",
+      "priority": 6,
+      "origin": "KCG",
+      "destination": "HYB",
+      "scheduled_arrival": "2025-09-22T09:20:00",
+      "scheduled_departure": "2025-09-22T09:35:00",
+      "platform_pref": 1
+    },
+    {
+      "id": "T104",
+      "type": "Express",
+      "priority": 9,
+      "origin": "HYB",
+      "destination": "KCG",
+      "scheduled_arrival": "2025-09-22T09:05:00",
+      "scheduled_departure": "2025-09-22T09:30:00",
+      "platform_pref": 1
+    },
+    {
+      "id": "T105",
+      "type": "Freight",
+      "priority": 2,
+      "origin": "SC",
+      "destination": "HYB",
+      "scheduled_arrival": "2025-09-22T09:15:00",
+      "scheduled_departure": "2025-09-22T09:45:00",
+      "platform_pref": 2
+    },
+    {
+      "id": "T106",
+      "type": "Passenger",
+      "priority": 4,
+      "origin": "HYB",
+      "destination": "SC",
+      "scheduled_arrival": "2025-09-22T09:10:00",
+      "scheduled_departure": "2025-09-22T09:25:00",
+      "platform_pref": 1
+    }
+  ]
+}
