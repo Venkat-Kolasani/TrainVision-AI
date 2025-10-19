@@ -223,18 +223,67 @@ npm run dev
 - **Real-time Insights**: Contextual analysis based on current system state and conflicts
 - **Production Ready**: Fully configured and operational in the live deployment
 
-## 🔬 Optimization Algorithms
+## 🧮 Advanced Optimization Algorithms
 
-### Greedy Algorithm (Default)
-- Fast execution suitable for real-time operations
-- Conflict-aware assignment with priority consideration
-- Handles delays and manual overrides effectively
+TrainVision AI employs sophisticated algorithms for train scheduling, conflict resolution, and railway throughput optimization:
 
-### ILP Optimization (Advanced)
-- Optimal solutions using Integer Linear Programming
-- Configurable objectives (minimize delays, conflicts, or balanced)
-- Adjustable time limits for computation
-- Handles complex constraint scenarios
+### 🚀 Greedy Algorithm (Real-time Optimization)
+**Purpose**: Real-time train scheduling with conflict resolution
+- **Time Complexity**: O(n log n) for n trains
+- **Execution Speed**: Sub-second optimization for immediate decisions
+- **Features**:
+  - Priority-based train sorting (Express > Local > Freight)
+  - Dynamic platform assignment with conflict avoidance
+  - Automatic delay injection for conflict resolution
+  - Manual override integration with impact analysis
+- **Use Case**: Live operations requiring immediate scheduling decisions
+
+### 🎯 Integer Linear Programming (ILP) - Optimal Solutions
+**Purpose**: Mathematical optimization for maximum railway throughput
+- **Solver**: PuLP with CBC backend for optimal solutions
+- **Objective Function**: `minimize(Σ delays + Σ conflict_penalties)`
+- **Constraints**:
+  - Platform capacity constraints (no overlapping assignments)
+  - Minimum headway requirements (5-minute safety buffer)
+  - Fixed platform assignments (controller overrides)
+  - Train assignment uniqueness
+- **Features**:
+  - Configurable objectives (minimize delays/conflicts/balanced)
+  - Time-bounded optimization (adjustable solver limits)
+  - Handles complex multi-constraint scenarios
+- **Use Case**: Strategic planning and optimal resource utilization
+
+### 🔍 Conflict Detection & Resolution Engine
+**Purpose**: Proactive conflict identification and automated resolution
+- **Algorithm**: Multi-pass conflict detection with severity scoring
+- **Conflict Types**:
+  - **Platform Overlap**: Same platform, overlapping time windows
+  - **Headway Violations**: Insufficient safety margins (<5 minutes)
+  - **Priority Conflicts**: Lower priority trains blocking higher priority
+- **Resolution Strategies**:
+  - Platform reassignment optimization
+  - Temporal delay injection with minimal impact
+  - Priority-based train reordering
+- **Performance**: Real-time conflict detection with <100ms response
+
+### 🤖 AI-Powered Throughput Optimization
+**Purpose**: Intelligent recommendations for system-wide efficiency
+- **Engine**: Google Gemini 2.5 Flash with railway domain expertise
+- **Optimization Targets**:
+  - **Throughput Maximization**: Optimal train-per-hour ratios
+  - **Delay Minimization**: Predictive delay prevention
+  - **Resource Utilization**: Platform and track efficiency optimization
+- **Features**:
+  - Predictive conflict analysis
+  - Cost-benefit scoring for recommendations
+  - Multi-objective optimization balancing
+  - Real-time adaptation to system changes
+
+### 📊 Performance Optimization Metrics
+- **Throughput**: Trains processed per hour per platform
+- **Efficiency**: Platform utilization percentage (target: 80-90%)
+- **Reliability**: On-time performance (target: >95% within 2 minutes)
+- **Conflict Resolution**: Average resolution time <30 seconds
 
 ## 📈 Performance Metrics
 
@@ -388,6 +437,22 @@ BACKEND_URL=https://trainvision-ai.onrender.com
 - **Subsequent Requests**: <2 seconds response time
 - **AI Responses**: 3-10 seconds depending on query complexity
 
+## 📚 Documentation
+
+For comprehensive technical documentation, including system architecture, algorithms, API reference, and development guide, see:
+
+**[📖 Complete Technical Documentation](./documentation.md)**
+
+The documentation covers:
+- **System Architecture**: Detailed technical overview and component interactions
+- **Core Algorithms**: Greedy optimization, ILP solver, conflict detection, and AI recommendations
+- **API Reference**: Complete endpoint documentation with examples
+- **Data Models**: Comprehensive schema and data structure documentation
+- **Frontend Components**: React component architecture and state management
+- **AI Integration**: Gemini AI implementation and use cases
+- **Deployment Guide**: Production deployment on Vercel and Render
+- **Development Setup**: Local development environment and contribution guidelines
+
 ## 🤝 Contributing
 
 This system demonstrates advanced railway optimization concepts and can be extended with:
@@ -396,6 +461,8 @@ This system demonstrates advanced railway optimization concepts and can be exten
 - Integration with real railway systems
 - Enhanced visualization capabilities
 - Mobile applications for field operations
+
+Please refer to the [technical documentation](./documentation.md) for detailed development guidelines and system architecture.
 
 ## 📄 License
 
