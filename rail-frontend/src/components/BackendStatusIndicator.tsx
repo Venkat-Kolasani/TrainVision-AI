@@ -136,7 +136,7 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
   return (
     <div className="relative">
       <div
-        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${config.color} text-sm font-medium transition-all cursor-pointer ${config.pulse ? 'animate-pulse' : ''}`}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${config.color} text-sm font-medium transition-all ${status === 'offline' ? 'cursor-pointer' : 'cursor-default'} ${config.pulse ? 'animate-pulse' : ''}`}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
         role="status"
