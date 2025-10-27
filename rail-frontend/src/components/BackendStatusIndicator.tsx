@@ -139,7 +139,6 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
         className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${config.color} text-sm font-medium transition-all cursor-pointer ${config.pulse ? 'animate-pulse' : ''}`}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
-        onClick={() => status === 'offline' && handleRetry()}
         role="status"
         aria-live="polite"
         aria-label={`Backend status: ${config.text}`}
