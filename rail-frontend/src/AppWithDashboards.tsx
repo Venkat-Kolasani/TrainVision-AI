@@ -11,7 +11,6 @@ import App from './App';
 import SimulationDashboard from './components/SimulationDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import { ChatBot } from './components/ChatBot';
-import { BackendStatusIndicator } from './components/BackendStatusIndicator';
 
 type DashboardView = 'main' | 'simulation' | 'analytics';
 
@@ -190,9 +189,6 @@ const AppWithDashboards: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-4">
-          {/* Backend Status Indicator */}
-          <BackendStatusIndicator apiBase={API_BASE} />
-
           {/* Conflicts Indicator */}
           {conflicts.length > 0 && (
             <div className="flex items-center gap-2 bg-red-900/30 border border-red-600 rounded px-3 py-1">
