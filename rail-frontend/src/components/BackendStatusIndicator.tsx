@@ -87,7 +87,7 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
       if (intervalId) clearInterval(intervalId);
       if (countdownId) clearInterval(countdownId);
     };
-  }, [status, apiBase]);
+  }, [status, apiBase, checkBackendHealth]);
 
   const handleRetry = () => {
     setStatus('checking');
