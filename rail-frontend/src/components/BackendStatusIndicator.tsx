@@ -33,13 +33,16 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
     let countdownId: ReturnType<typeof setInterval>;
 
     const monitorBackend = async () => {
+      console.log(`🔍 Checking backend health... (current status: ${status})`);
       const isHealthy = await checkBackendHealth();
 
       if (isHealthy) {
         // Backend is healthy - set to connected
-        setStatus('connected');
-        setCountdown(60);
-        console.log('✅ Backend connected successfully');
+        if (status !== 'connected') {
+          setStatus('connected');
+          setCountdown(60);
+          console.log('✅ Backend connected successfully');
+        }
       } else {
         // Backend not responding
         if (status === 'checking') {
@@ -53,7 +56,7 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
           setCountdown(60);
           console.log('⚠️ Backend connection lost, attempting to reconnect...');
         }
-        // If already 'starting' or 'offline', keep that status
+        // If already 'starting' or 'offline', keep polling
       }
     };
 
@@ -61,8 +64,8 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
     monitorBackend();
 
     // Set up polling based on current status
-    if (status === 'starting' || status === 'checking') {
-      // Poll every 3 seconds when starting or checking
+    if (status === 'starting' || status === 'checking' || status === 'offline') {
+      // Poll every 3 seconds when starting, checking, or offline
       intervalId = setInterval(monitorBackend, 3000);
 
       // Countdown timer only when starting
@@ -70,9 +73,8 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
         countdownId = setInterval(() => {
           setCountdown((prev) => {
             if (prev <= 1) {
-              setStatus('offline');
-              console.log('❌ Backend failed to start within timeout');
-              return 0;
+              console.log('⏱️ Countdown reached 0, but continuing to poll...');
+              return 60; // Reset countdown instead of going offline
             }
             return prev - 1;
           });
@@ -89,11 +91,6 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
     };
   }, [status, apiBase]);
 
-  const handleRetry = () => {
-    setStatus('checking');
-    setCountdown(60);
-  };
-
   const getStatusConfig = () => {
     switch (status) {
       case 'connected':
@@ -107,7 +104,7 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
       case 'starting':
         return {
           icon: <Loader className="w-4 h-4 animate-spin" />,
-          text: `Starting... (~${countdown}s)`,
+          text: countdown > 0 ? `Starting... (~${countdown}s)` : 'Starting...',
           color: 'bg-orange-500/20 border-orange-500 text-orange-400',
           iconColor: 'text-orange-400',
           pulse: true,
@@ -139,22 +136,12 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
         className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${config.color} text-sm font-medium transition-all cursor-pointer ${config.pulse ? 'animate-pulse' : ''}`}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
-        onClick={() => status === 'offline' && handleRetry()}
         role="status"
         aria-live="polite"
         aria-label={`Backend status: ${config.text}`}
       >
         <span className={config.iconColor}>{config.icon}</span>
         <span className="hidden sm:inline">{config.text}</span>
-        {status === 'offline' && (
-          <button
-            onClick={handleRetry}
-            className="ml-2 text-xs underline hover:no-underline"
-            aria-label="Retry backend connection"
-          >
-            Retry
-          </button>
-        )}
       </div>
 
       {/* Tooltip */}
