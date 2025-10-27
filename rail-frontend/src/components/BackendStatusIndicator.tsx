@@ -64,8 +64,8 @@ export function BackendStatusIndicator({ apiBase }: BackendStatusIndicatorProps)
     monitorBackend();
 
     // Set up polling based on current status
-    if (status === 'starting' || status === 'checking' || status === 'offline') {
-      // Poll every 3 seconds when starting, checking, or offline
+    if (status === 'starting' || status === 'checking') {
+      // Poll every 3 seconds when starting or checking
       intervalId = setInterval(monitorBackend, 3000);
 
       // Countdown timer only when starting
