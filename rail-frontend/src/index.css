@@ -4,6 +4,22 @@
 
 @layer base {
   body {
-    @apply bg-slate-900 font-sans text-slate-100 antialiased;
+    @apply bg-surface-1 font-sans text-slate-100 antialiased;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

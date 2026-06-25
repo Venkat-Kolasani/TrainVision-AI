@@ -20,10 +20,14 @@ export interface DashboardStatus {
   isInitialLoadComplete: boolean;
 }
 
+export type WorkspaceTab = 'schedule' | 'timeline' | 'activity';
+
 export interface DashboardShellActions {
   refreshAll: () => Promise<void>;
   resetSystem: () => Promise<void>;
   openAuditLogs: () => void;
+  openWorkspaceTab?: (tab: WorkspaceTab) => void;
+  openCommandCenter?: () => void;
 }
 
 interface DashboardShellContextValue {

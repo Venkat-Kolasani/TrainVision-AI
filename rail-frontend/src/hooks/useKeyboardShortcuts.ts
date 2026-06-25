@@ -4,6 +4,7 @@ interface ShortcutHandlers {
   onRefresh?: () => void;
   onSearch?: () => void;
   onHelp?: () => void;
+  onCommandCenter?: () => void;
 }
 
 export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true) {
@@ -29,6 +30,10 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true)
       if (e.key === '?' && e.shiftKey) {
         e.preventDefault();
         handlers.onHelp?.();
+      }
+      if ((e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        handlers.onCommandCenter?.();
       }
     };
 

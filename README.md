@@ -1,16 +1,21 @@
-# 🚂 TrainVision AI Decision Support System [ SIH25022 ]
+# TrainVision AI Decision Support System [ SIH25022 ]
 
-A comprehensive railway traffic management and optimization system with AI-powered decision support capabilities, featuring advanced conflict detection, feasibility analysis, and intelligent recommendations.
+A railway traffic decision-support system for the Hyderabad corridor (HYB, SC, KCG): live monitoring, conflict resolution, schedule optimization, and command-center wall-display mode.
 
-## 🌐 **LIVE DEMO**
-- **🎯 Frontend Application**: https://trainvision.vercel.app/
-- **🔧 Backend API**: https://trainvision-ai.onrender.com/
-- **📚 API Documentation**: https://trainvision-ai.onrender.com/docs
-- **🤖 AI Status**: https://trainvision-ai.onrender.com/ai/status
+## Live Demo
+- **Frontend Application**: https://trainvision.vercel.app/
+- **Backend API**: https://trainvision-ai.onrender.com/
+- **API Documentation**: https://trainvision-ai.onrender.com/docs
+- **AI Status**: https://trainvision-ai.onrender.com/ai/status
+- **Health (Redis status)**: https://trainvision-ai.onrender.com/health
 
-> **Try it now!** The system is fully deployed and ready to use. Test the ChatBot, explore train schedules, and see AI-powered optimization in action.
+## Features
 
-## ✨ Features
+### Command Center (Operations)
+- **Wall-display mode** — Press `F` or use **Command center** in the toolbar for fullscreen monitoring
+- **Status board** — Trains, on-time %, conflicts, average delay at a glance
+- **Tabbed workspace** — Schedule, Timeline (Gantt), and Activity (audit log)
+- **Operator actions only** — Manual override and clear delays on Operations; diagnostics live in Simulation
 
 ### Core Functionality
 - **Real-time Train Scheduling**: Dynamic optimization using both Greedy and ILP algorithms
@@ -24,7 +29,7 @@ A comprehensive railway traffic management and optimization system with AI-power
 - **Scenario Simulation**: What-if analysis for delays, breakdowns, weather, and priority changes
 - **Analytics Dashboard**: Comprehensive performance metrics and system insights
 - **ILP Optimization**: Integer Linear Programming for optimal scheduling (using PuLP/OR-Tools)
-- **Real-time Updates**: WebSocket-based live train position tracking
+- **Real-time Updates**: WebSocket train positions; optional Redis pub/sub for multi-worker fan-out on Render
 - **Audit Logging**: Complete audit trail of all system actions and decisions
 
 ### User Interface
@@ -34,19 +39,12 @@ A comprehensive railway traffic management and optimization system with AI-power
 - **Interactive Maps**: Enhanced railway network visualization with real-time train positions
 - **AI ChatBot**: Conversational interface for system queries and explanations
 
-## 🎯 **Quick Access Links**
+### Accessibility
+Keyboard shortcuts (`F`, `Esc`, `R`), skip link, `aria-live` alerts, and reduced-motion support. See [rail-frontend/ACCESSIBILITY.md](rail-frontend/ACCESSIBILITY.md).
 
-| Resource | URL | Description |
-|----------|-----|-------------|
-| 🎮 **Live Demo** | https://trainvision.vercel.app/ | Full interactive application |
-| 🔧 **API Backend** | https://trainvision-ai.onrender.com/ | REST API endpoints |
-| 📚 **API Docs** | https://trainvision-ai.onrender.com/docs | Interactive API documentation |
-| 🤖 **AI Status** | https://trainvision-ai.onrender.com/ai/status | Gemini AI configuration check |
-| 📊 **GitHub Repo** | https://github.com/Venkat-Kolasani/TrainVision-AI | Source code and documentation |
+## Architecture
 
-## 🏗️ Architecture
-
-### 🌐 **Production Deployment**
+### Production Deployment
 - **Frontend**: React + TypeScript deployed on **Vercel** (https://trainvision.vercel.app/)
 - **Backend**: FastAPI deployed on **Render** (https://trainvision-ai.onrender.com/)
 - **AI Integration**: Google Gemini 2.5 Flash for intelligent responses
@@ -120,9 +118,18 @@ cp .env.example .env
 python main.py
 ```
 
+Optional Redis for multi-worker WebSocket testing:
+
+```bash
+# From repo root
+docker compose up -d redis
+export REDIS_URL=redis://localhost:6379/0
+```
+
 #### Frontend Setup
 ```bash
 cd rail-frontend
+cp .env.example .env.local
 npm install
 npm run dev
 ```
@@ -139,15 +146,15 @@ npm run dev
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 
-## 📊 Dashboard Overview
+## Dashboard Overview
 
-### 1. Main Dashboard
-- Real-time train scheduling and visualization
-- Manual override capabilities with feasibility checking
-- Live conflict detection and resolution
-- Interactive railway network map
+### 1. Operations (Command Center)
+- Network map with live train positions and status board
+- Command Center fullscreen (`F`) for wall-display monitoring
+- Tabbed Schedule, Timeline, and Activity workspace
+- Manual override and clear delays (operator actions only)
 
-### 2. Simulation Dashboard
+### 2. Simulation
 - Scenario testing (delays, breakdowns, weather, priority changes)
 - Before/after impact analysis
 - Recommended actions for each scenario

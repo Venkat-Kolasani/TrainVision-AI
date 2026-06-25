@@ -32,9 +32,15 @@ interface ChatBotProps {
 }
 
 export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoExplain, onClose, onAutoExplanationComplete }: ChatBotProps) {
+  const PROMPT_CHIPS = [
+    'Explain active conflicts',
+    'Summarize current delays',
+    'Why was the last override applied?',
+  ];
+
   const [messages, setMessages] = useState<Message[]>([{
     id: '1',
-    text: '👋 Hi there! I\'m your Railway Operations Assistant. \n\nI can help you understand:\n🚂 What happened with recent train schedule changes\n🔧 Why the system made certain optimization decisions\n📊 How conflicts were resolved\n🚉 What\'s happening at specific stations\n\nJust ask me anything about your railway operations - I\'ll explain it in simple terms!',
+    text: 'Railway Operations Assistant\n\nI can explain schedule changes, conflict resolutions, and optimization decisions for the Hyderabad corridor (HYB, SC, KCG).\n\nSelect a prompt below or ask a question.',
     sender: 'bot',
     timestamp: new Date()
   }]);
@@ -155,7 +161,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
 
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
-        text: `🤖 **Auto-Explanation:**\n\n${botResponse}`,
+        text: `Auto-explanation:\n\n${botResponse}`,
         sender: 'bot',
         timestamp: new Date()
       }]);
@@ -407,6 +413,21 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
           </div>
         )}
         <div ref={messagesEndRef} />
+      </div>
+
+      <div className="border-t border-slate-600 px-4 pt-3">
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {PROMPT_CHIPS.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => setInput(chip)}
+              className="rounded-full border border-slate-600 bg-surface-3 px-2.5 py-1 text-xs text-slate-300 hover:border-primary hover:text-white"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="border-t border-slate-600 p-4">

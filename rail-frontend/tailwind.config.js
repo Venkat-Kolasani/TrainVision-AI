@@ -3,7 +3,10 @@ export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
-      fontFamily: { sans: ["Inter", "ui-sans-serif", "system-ui"] },
+      fontFamily: {
+        sans: ["Inter", "ui-sans-serif", "system-ui"],
+        mono: ["JetBrains Mono", "SF Mono", "ui-monospace", "monospace"],
+      },
       colors: {
         primary: { DEFAULT: "#4F46E5", light: "#6366F1", dark: "#4338CA" },
         secondary: { DEFAULT: "#F59E0B", light: "#FBBF24", dark: "#D97706" },

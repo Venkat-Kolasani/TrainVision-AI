@@ -11,6 +11,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { PageHeader } from './layout/PageHeader';
+import { Button } from './ui/Button';
+import { PRODUCT_COPY } from '../lib/productCopy';
 
 interface AnalyticsData {
   summary: {
@@ -178,32 +181,22 @@ const AnalyticsDashboard: React.FC = () => {
   return (
     <div className="min-h-screen bg-surface-1 p-6 text-white">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold mb-2">📊 Analytics Dashboard</h1>
-            <p className="text-slate-400">
-              Comprehensive performance analysis and system insights
-            </p>
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={refreshAnalytics}
-              disabled={loading}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-4 py-2 rounded"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded"
-            >
-              <Settings className="w-4 h-4" />
-              Settings
-            </button>
-          </div>
-        </div>
+        <PageHeader
+          title="Analytics"
+          subtitle={PRODUCT_COPY.analytics}
+          actions={
+            <>
+              <Button variant="secondary" onClick={refreshAnalytics} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+              <Button variant="ghost" onClick={() => setShowSettings(true)}>
+                <Settings className="h-4 w-4" />
+                Settings
+              </Button>
+            </>
+          }
+        />
 
         {/* Key Performance Indicators */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

@@ -11,14 +11,66 @@ from recommendations import generate_recommendations
 import copy
 import threading
 import time
+import logging
 import os
 from dotenv import load_dotenv
 import google.generativeai as genai
+import redis_bus
 
 # Load environment variables
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Rail Optimizer API", version="0.1.0")
+
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _schedule_event_payload(event_type: str, extra: Optional[Dict] = None) -> Dict:
+    return {
+        "type": event_type,
+        "data": extra or {},
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def notify_realtime_clients(event_type: str = "schedule_update", extra: Optional[Dict] = None) -> None:
+    """Fan out schedule/conflict updates to WebSocket clients (Redis or local)."""
+    payload = _schedule_event_payload(event_type, extra)
+    if redis_bus.is_enabled():
+        redis_bus.publish_event(event_type, extra or {})
+        return
+    loop = _main_loop
+    if loop is None:
+        return
+    message = json.dumps(payload)
+    asyncio.run_coroutine_threadsafe(manager.broadcast(message), loop)
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
+    redis_bus.init_redis()
+
+    def _on_redis_message(event_type: str, data) -> None:
+        loop = _main_loop
+        if loop is None:
+            return
+        message = json.dumps(_schedule_event_payload(event_type, data if isinstance(data, dict) else {"value": data}))
+        asyncio.run_coroutine_threadsafe(manager.broadcast(message), loop)
+
+    redis_bus.subscribe(_on_redis_message)
+
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "ok",
+        "redis": redis_bus.status(),
+        "websocket_clients": len(manager.active_connections),
+    }
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -291,10 +343,10 @@ def override_schedule(req: OverrideRequest):
         action="override_completed",
         details=f"✅ Override COMPLETED: {req.train_id} successfully assigned to P{req.new_platform}, {len(conflicts_caused)} other trains affected"
     ))
-    
+
+    notify_realtime_clients("schedule_update", {"source": "override", "train_id": req.train_id})
+
     return {
-        "status": "success", 
-        "message": "Override applied, schedule updated", 
         "reason": reason_for_train, 
         "conflicts_caused": len(conflicts_caused),
         "affected_trains": [c["train_id"] for c in conflicts_caused],
@@ -568,7 +620,9 @@ def inject_delay(req: DelayInjectionRequest):
         action="delay_optimization",
         details=f"🔄 DELAY OPTIMIZATION: {req.train_id} delay caused {len(affected_trains)} trains to be re-optimized. Total delay impact: +{total_delay_impact:.1f} minutes"
     ))
-    
+
+    notify_realtime_clients("schedule_update", {"source": "inject_delay", "train_id": req.train_id})
+
     return DelayInjectionResponse(
         status="success",
         message=f"Delay injected successfully. {len(affected_trains)} trains affected.",
@@ -598,7 +652,9 @@ def clear_all_delays():
         action="delays_cleared",
         details=f"🧹 DELAYS CLEARED: Removed {old_delay_count} active delays. System re-optimized to baseline."
     ))
-    
+
+    notify_realtime_clients("schedule_update", {"source": "clear_delays", "cleared_count": old_delay_count})
+
     return {"status": "success", "message": f"Cleared {old_delay_count} delays", "cleared_count": old_delay_count}
 
 # Conflict injection endpoint
@@ -663,7 +719,9 @@ def inject_conflict():
         action="conflict_optimization",
         details=f"🔄 CONFLICT OPTIMIZATION: {train1.id} and {train2.id} conflict caused {len(affected_trains)} trains to be re-optimized. Total delay impact: +{total_delay_impact:.1f} minutes"
     ))
-    
+
+    notify_realtime_clients("schedule_update", {"source": "inject_conflict"})
+
     return {
         "status": "conflict_injected",
         "message": f"Conflict injected successfully. {len(affected_trains)} trains affected.",
@@ -1274,6 +1332,8 @@ def apply_recommendation(recommendation_id: str):
             action="recommendation_applied",
             details=f"Applied recommendation: {recommendation.description}"
         ))
+
+        notify_realtime_clients("schedule_update", {"source": "apply_recommendation", "recommendation_id": recommendation_id})
 
         return {
             "status": "success",

@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Play, AlertTriangle, TrendingUp, Clock, Train, Zap } from 'lucide-react';
+import { Play, AlertTriangle, TrendingUp, TrendingDown, Minus, Clock, Train, Zap, X } from 'lucide-react';
 import { ConflictTestingPanel } from './ConflictTestingPanel';
+import { SimulationDiagnostics } from './operations/SimulationDiagnostics';
+import { PageHeader } from './layout/PageHeader';
+import { EmptyState } from './layout/EmptyState';
+import { SectionCard } from './layout/SectionCard';
+import { Button } from './ui/Button';
 import { notify } from '../lib/notify';
+import { PRODUCT_COPY } from '../lib/productCopy';
 
 interface SimulationScenario {
   scenario_id: string;
@@ -147,18 +153,35 @@ const SimulationDashboard: React.FC = () => {
   };
 
   const getImpactIcon = (value: number) => {
-    if (value > 0) return '↗️';
-    if (value < 0) return '↘️';
-    return '➡️';
+    if (value > 0) return <TrendingUp className="h-4 w-4 text-danger" aria-hidden />;
+    if (value < 0) return <TrendingDown className="h-4 w-4 text-success" aria-hidden />;
+    return <Minus className="h-4 w-4 text-slate-400" aria-hidden />;
+  };
+
+  const applyPreset = (preset: 'hyb-delay' | 'priority-swap') => {
+    if (preset === 'hyb-delay') {
+      setScenarioType('delay');
+      setDelayMinutes(15);
+      setSelectedStation('HYB');
+      if (trains[0]) setSelectedTrain(trains[0].id);
+    } else {
+      setScenarioType('priority');
+      if (trains.length >= 2) setSelectedTrain(trains[0].id);
+    }
   };
 
   return (
     <div className="min-h-screen bg-surface-1 p-6 text-white">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="mb-2 text-3xl font-bold">Scenario Simulation</h1>
-          <p className="text-slate-400">Test what-if scenarios and analyze their impact on train operations</p>
+        <PageHeader title="Scenario simulation" subtitle={PRODUCT_COPY.simulation} />
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          <Button variant="ghost" onClick={() => applyPreset('hyb-delay')}>
+            15 min delay at HYB
+          </Button>
+          <Button variant="ghost" onClick={() => applyPreset('priority-swap')}>
+            Priority swap
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -280,13 +303,15 @@ const SimulationDashboard: React.FC = () => {
                         </span>
                       </div>
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteScenario(id);
                         }}
-                        className="text-red-400 hover:text-red-300 text-xs"
+                        className="text-red-400 hover:text-red-300"
+                        aria-label="Remove scenario"
                       >
-                        ✕
+                        <X className="h-3.5 w-3.5" />
                       </button>
                     </div>
                     <div className="text-xs text-slate-400 mt-1">
@@ -477,27 +502,31 @@ const SimulationDashboard: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="bg-slate-800 rounded-lg p-12 text-center">
-                <div className="text-6xl mb-4">🎯</div>
-                <h2 className="text-2xl font-semibold mb-2">No Simulation Selected</h2>
-                <p className="text-slate-400 mb-6">
-                  Run a new simulation or select an existing scenario from the history to view detailed results.
-                </p>
-                <button
-                  onClick={() => {
-                    if (trains.length > 0) {
-                      setSelectedTrain(trains[0].id);
-                      runSimulation();
-                    }
-                  }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded"
-                >
-                  Run Sample Simulation
-                </button>
-              </div>
+              <SectionCard>
+                <EmptyState
+                  icon={Play}
+                  title="No simulation selected"
+                  description="Run a new simulation or select an existing scenario from history to view predicted impact."
+                  action={
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        if (trains.length > 0) {
+                          setSelectedTrain(trains[0].id);
+                          void runSimulation();
+                        }
+                      }}
+                    >
+                      Run sample simulation
+                    </Button>
+                  }
+                />
+              </SectionCard>
             )}
           </div>
         </div>
+
+        <SimulationDiagnostics trains={trains} onRefresh={fetchInitialData} />
 
         <div className="mt-8">
           <ConflictTestingPanel

@@ -1,4 +1,4 @@
-# 🚀 Deploy TrainVision AI Backend to Render.com
+# Deploy TrainVision AI Backend to Render.com
 
 ## Step 1: Prepare Your Repository
 Make sure your code is pushed to GitHub with all the recent changes.
@@ -39,6 +39,25 @@ Add these environment variables:
 | `GEMINI_API_KEY` | Your Gemini API key from Google |
 | `GEMINI_MODEL` | `gemini-2.5-flash` |
 | `PYTHON_VERSION` | `3.11.7` |
+| `REDIS_URL` | *(optional)* Redis connection URL for multi-worker WebSocket fan-out — e.g. Render Redis or `redis://localhost:6379/0` |
+
+### Optional Redis (multi-worker WebSockets)
+
+Render runs Gunicorn with **2 workers**. Without Redis, WebSocket clients only receive broadcasts from the worker they are connected to.
+
+1. Create a Redis instance (Render Redis, Upstash, or local `docker compose up redis`)
+2. Set `REDIS_URL` on the backend service
+3. Verify: `GET /health` returns `"redis": "connected"`
+
+Local full-stack with Redis:
+
+```bash
+docker compose up -d redis
+export REDIS_URL=redis://localhost:6379/0
+cd backend && python main.py
+```
+
+If `REDIS_URL` is unset, the API runs in single-worker mode (still functional for development).
 
 ## Step 6: Deploy
 1. Click **"Create Web Service"**

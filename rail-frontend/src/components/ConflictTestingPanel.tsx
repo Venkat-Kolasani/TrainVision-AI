@@ -59,7 +59,7 @@ export function ConflictTestingPanel({
     <div className="bg-surface-2 rounded-lg border border-slate-700 p-6">
       <h2 className="mb-1 flex items-center gap-2 text-xl font-semibold text-slate-100">
         <FlaskConical className="h-5 w-5 text-warning" />
-        Conflict & Override Testing
+        Advanced testing
       </h2>
       <p className="mb-4 text-sm text-slate-400">
         Developer tools for validating optimizer conflict resolution and feasibility checks.

@@ -598,6 +598,7 @@ The system uses a realistic Hyderabad railway network dataset:
 
 ### Core Operations
 ```
+GET  /health                    # Service health and Redis status
 GET  /trains                    # Get all trains
 GET  /schedule                  # Get optimized schedule with conflicts
 POST /override                  # Apply manual override
@@ -638,6 +639,24 @@ GET  /ai/status              # Check Gemini AI configuration
 
 ## Frontend Components
 
+### Frontend Architecture (Phase 3A)
+
+**Layout primitives** (`rail-frontend/src/components/layout/`):
+- `PageHeader`, `SectionCard`, `EmptyState`, `Tabs`, `ContextStrip`, `SkipLink`, `LiveRegion`
+- Shared copy in `lib/productCopy.ts`; audit formatting in `lib/auditFormat.ts`
+
+**Operations command center** (`rail-frontend/src/components/operations/`):
+- **Zone A**: `NetworkMap` (8 cols) + `StatusBoard`, `AlertsPanel`, `OperationsPanel` (4 cols)
+- **Zone B**: Tabbed `ScheduleTable` | `ScheduleTimelinePanel` (Gantt) | `ActivityPanel`
+- **Command Center**: `CommandCenterView` fullscreen overlay (`F` / toolbar); `useCommandCenter` hook
+- Modals: `OverrideModal`, `DelayWarningModal`; diagnostics moved to `SimulationDiagnostics`
+
+**Accessibility**: See `rail-frontend/ACCESSIBILITY.md` (keyboard shortcuts, `aria-live`, reduced motion).
+
+### Production Real-time (optional Redis)
+
+Gunicorn multi-worker deployments use `backend/redis_bus.py` for pub/sub. Schedule mutations call `notify_realtime_clients()`; WebSocket clients receive `schedule_update` events. Set `REDIS_URL` in production; `GET /health` reports Redis status.
+
 ### 1. Multi-Dashboard Architecture
 
 **Location**: `rail-frontend/src/AppWithDashboards.tsx`
@@ -653,15 +672,15 @@ const AppWithDashboards: React.FC = () => {
 };
 ```
 
-### 2. Main Dashboard
+### 2. Operations Dashboard (Command Center)
 
 **Location**: `rail-frontend/src/App.tsx`
 
-Core operational dashboard with:
-- **KPI Cards**: Total trains, on-time percentage, average delays
-- **Schedule Table**: Interactive train schedule with override buttons
-- **Railway Network Map**: Real-time train visualization with geographic positioning
-- **Audit Log**: Live system activity tracking
+Railway operations console:
+- **Context strip** — product explanation (dismissible)
+- **Map + status rail** — network map, KPI status board, alerts, override/clear delays
+- **Workspace tabs** — Schedule, Timeline, Activity audit log
+- **Command Center mode** — wall-display fullscreen via `CommandCenterView`
 
 ### 3. Simulation Dashboard
 

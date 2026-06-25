@@ -12,16 +12,20 @@ import {
   Wifi,
   WifiOff,
   Clock,
+  Maximize2,
 } from 'lucide-react';
 import App from './App';
 import SimulationDashboard from './components/SimulationDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import { ChatBot } from './components/ChatBot';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
+import { Button } from './components/ui/Button';
 import { RecommendationsPanel } from './components/operations/RecommendationsPanel';
+import { SkipLink } from './components/layout/SkipLink';
 import { notify } from './lib/notify';
 import { useDashboardShell } from './context/DashboardShellContext';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useCommandCenter } from './hooks/useCommandCenter';
 import { getConflictCount } from './lib/apiNormalize';
 import type { Recommendation, ConflictsResponse, ConflictItem } from './types/railway';
 
@@ -35,6 +39,7 @@ const healthStyles = {
 
 const AppWithDashboards: React.FC = () => {
   const { status, actions } = useDashboardShell();
+  const commandCenter = useCommandCenter();
   const [currentView, setCurrentView] = useState<DashboardView>('main');
   const [showChatBot, setShowChatBot] = useState(false);
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
@@ -177,6 +182,9 @@ const AppWithDashboards: React.FC = () => {
       searchInput?.focus();
     },
     onHelp: () => setShowShortcutHelp(true),
+    onCommandCenter: () => {
+      if (currentView === 'main') commandCenter.open();
+    },
   });
 
   const shellConflictCount = getConflictCount(shellConflicts);
@@ -185,155 +193,137 @@ const AppWithDashboards: React.FC = () => {
     ? status.lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '—';
 
-  const renderNavigation = () => (
-    <header className="border-b border-slate-700 bg-surface-2">
-      <div className="flex items-center justify-between px-6 py-3">
-        <div className="flex items-center space-x-6">
-          <div className="flex items-center space-x-3">
-            <img src="/train-logo.png" alt="TrainVision AI" className="h-8 w-8" />
-            <div>
-              <h1 className="text-lg font-semibold text-white">TrainVision AI</h1>
-              <p className="text-xs text-slate-400">Operations Console</p>
-            </div>
-          </div>
-          <nav className="flex space-x-1" aria-label="Main navigation">
-            {(
-              [
-                { id: 'main' as const, label: 'Operations', icon: Home },
-                { id: 'simulation' as const, label: 'Simulation', icon: Play },
-                { id: 'analytics' as const, label: 'Analytics', icon: BarChart3 },
-              ] as const
-            ).map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setCurrentView(id)}
-                className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                  currentView === id
-                    ? 'bg-primary text-white'
-                    : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {label}
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        <div className="flex items-center space-x-3">
-          {(shellConflictCount > 0 || conflicts.length > 0) && (
-            <div className="flex items-center gap-2 rounded border border-danger/40 bg-danger/10 px-3 py-1.5">
-              <AlertTriangle className="h-4 w-4 text-danger" />
-              <span className="text-sm text-danger">
-                {Math.max(shellConflictCount, conflicts.length)} conflicts
-              </span>
-            </div>
-          )}
-
-          {recommendations.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowRecommendationsPanel((open) => !open)}
-              className={`flex items-center gap-2 rounded border px-3 py-1.5 transition-colors ${
-                showRecommendationsPanel
-                  ? 'border-info bg-info/20 text-info'
-                  : 'border-info/40 bg-info/10 text-info hover:bg-info/20'
-              }`}
-            >
-              <Lightbulb className="h-4 w-4 text-info" />
-              <span className="text-sm text-info">{recommendations.length} recommendations</span>
-            </button>
-          )}
-
-          {currentView === 'main' && (
-            <>
-              <button
-                type="button"
-                onClick={() => actions?.openAuditLogs()}
-                className="flex items-center gap-2 rounded bg-slate-700 px-3 py-2 text-sm text-white transition-colors hover:bg-slate-600"
-              >
-                <ClipboardList className="h-4 w-4" />
-                Audit Logs
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleRefresh()}
-                disabled={refreshing}
-                className="flex items-center gap-2 rounded bg-success px-3 py-2 text-sm text-white transition-colors hover:bg-success-dark disabled:opacity-50"
-              >
-                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowResetConfirm(true)}
-                className="flex items-center gap-2 rounded bg-danger/90 px-3 py-2 text-sm text-white transition-colors hover:bg-danger"
-              >
-                <RotateCcw className="h-4 w-4" />
-                Reset
-              </button>
-            </>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setShowChatBot(true)}
-            className="flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm text-white transition-colors hover:bg-primary-light"
-          >
-            <Bot className="h-4 w-4" />
-            AI Assistant
-          </button>
-        </div>
-      </div>
-
-      {currentView === 'main' && (
-        <div className="flex flex-wrap items-center gap-4 border-t border-slate-700/80 bg-surface-1 px-6 py-2 text-xs text-slate-300">
-          <div className="flex items-center gap-1.5">
-            {status.websocketConnected ? (
-              <Wifi className="h-3.5 w-3.5 text-success" />
-            ) : (
-              <WifiOff className="h-3.5 w-3.5 text-danger" />
-            )}
-            <span>{status.websocketConnected ? 'Live connection' : 'Disconnected'}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Clock className="h-3.5 w-3.5 text-slate-400" />
-            <span>Last sync: {lastSyncLabel}</span>
-          </div>
-          <div
-            className={`rounded border px-2 py-0.5 font-medium ${healthStyles[status.systemHealth]}`}
-          >
-            {status.systemHealth}
-          </div>
-          <span>{status.trainCount} trains</span>
-          <span>{status.onTimePct}% on-time</span>
-          {status.conflictCount > 0 && (
-            <span className="text-danger">{status.conflictCount} active conflicts</span>
-          )}
-          {status.activeDelayCount > 0 && (
-            <span className="text-warning">{status.activeDelayCount} active delays</span>
-          )}
-        </div>
-      )}
-    </header>
-  );
-
-  const renderContent = () => {
-    switch (currentView) {
-      case 'simulation':
-        return <SimulationDashboard />;
-      case 'analytics':
-        return <AnalyticsDashboard />;
-      default:
-        return <App />;
-    }
+  const ccProps = {
+    isOpen: commandCenter.isOpen,
+    pauseRefresh: commandCenter.pauseRefresh,
+    alertSoundEnabled: commandCenter.alertSoundEnabled,
+    onClose: commandCenter.close,
+    onTogglePause: () => commandCenter.setPause(!commandCenter.pauseRefresh),
+    onToggleAlertSound: commandCenter.toggleAlertSound,
   };
 
   return (
     <div className={`min-h-screen bg-surface-1 transition-[padding] ${showRecommendationsPanel ? 'lg:pr-[28rem]' : ''}`}>
-      {renderNavigation()}
-      {renderContent()}
+      <SkipLink />
+      <header className="border-b border-slate-700 bg-surface-2">
+        <div className="flex items-center justify-between px-6 py-3">
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-3">
+              <img src="/train-logo.png" alt="" className="h-8 w-8" aria-hidden />
+              <div>
+                <h1 className="text-lg font-semibold text-white">TrainVision AI</h1>
+                <p className="text-xs text-slate-400">Operations Console</p>
+              </div>
+            </div>
+            <nav className="flex space-x-1" aria-label="Main navigation">
+              {(
+                [
+                  { id: 'main' as const, label: 'Operations', icon: Home },
+                  { id: 'simulation' as const, label: 'Simulation', icon: Play },
+                  { id: 'analytics' as const, label: 'Analytics', icon: BarChart3 },
+                ] as const
+              ).map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setCurrentView(id)}
+                  className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
+                    currentView === id
+                      ? 'bg-primary text-white'
+                      : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" aria-hidden />
+                  {label}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {(shellConflictCount > 0 || conflicts.length > 0) && (
+              <div className="flex items-center gap-2 rounded border border-danger/40 bg-danger/10 px-3 py-1.5" role="status">
+                <AlertTriangle className="h-4 w-4 text-danger" aria-hidden />
+                <span className="text-sm text-danger">
+                  {Math.max(shellConflictCount, conflicts.length)} conflicts
+                </span>
+              </div>
+            )}
+
+            {recommendations.length > 0 && (
+              <Button
+                variant="ghost"
+                className="border border-info/40 bg-info/10 text-info"
+                onClick={() => setShowRecommendationsPanel((open) => !open)}
+              >
+                <Lightbulb className="h-4 w-4" />
+                {recommendations.length} recommendations
+              </Button>
+            )}
+
+            {currentView === 'main' && (
+              <>
+                <Button variant="ghost" onClick={() => commandCenter.open()}>
+                  <Maximize2 className="h-4 w-4" />
+                  Command center
+                </Button>
+                <Button variant="ghost" onClick={() => actions?.openAuditLogs()}>
+                  <ClipboardList className="h-4 w-4" />
+                  Activity
+                </Button>
+                <Button variant="secondary" onClick={() => void handleRefresh()} disabled={refreshing}>
+                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Button variant="danger" onClick={() => setShowResetConfirm(true)}>
+                  <RotateCcw className="h-4 w-4" />
+                  Reset
+                </Button>
+              </>
+            )}
+
+            <Button variant="primary" onClick={() => setShowChatBot(true)}>
+              <Bot className="h-4 w-4" />
+              AI Assistant
+            </Button>
+          </div>
+        </div>
+
+        {currentView === 'main' && (
+          <div className="flex flex-wrap items-center gap-4 border-t border-slate-700/80 bg-surface-1 px-6 py-2 text-xs text-slate-300">
+            <div className="flex items-center gap-1.5">
+              {status.websocketConnected ? (
+                <Wifi className="h-3.5 w-3.5 text-success" aria-hidden />
+              ) : (
+                <WifiOff className="h-3.5 w-3.5 text-danger" aria-hidden />
+              )}
+              <span>{status.websocketConnected ? 'Live connection' : 'Disconnected'}</span>
+            </div>
+            <div className="flex items-center gap-1.5 font-mono tabular-nums">
+              <Clock className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+              <span>Last sync: {lastSyncLabel}</span>
+            </div>
+            <div className={`rounded border px-2 py-0.5 font-mono font-medium ${healthStyles[status.systemHealth]}`} role="status">
+              {status.systemHealth}
+            </div>
+            <span>{status.trainCount} trains</span>
+            <span className="font-mono tabular-nums">{status.onTimePct}% on-time</span>
+            <span className="text-slate-500">HYB · SC · KCG</span>
+          </div>
+        )}
+      </header>
+
+      <main id="main-content">
+        {currentView === 'simulation' && <SimulationDashboard />}
+        {currentView === 'analytics' && <AnalyticsDashboard />}
+        {currentView === 'main' && (
+          <App
+            commandCenter={ccProps}
+            recommendations={recommendations}
+            onApplyRecommendation={(id) => void applyRecommendation(id)}
+          />
+        )}
+      </main>
 
       <RecommendationsPanel
         open={showRecommendationsPanel}
@@ -347,7 +337,6 @@ const AppWithDashboards: React.FC = () => {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
           onClick={() => setShowShortcutHelp(false)}
-          onKeyDown={(e) => e.key === 'Escape' && setShowShortcutHelp(false)}
           role="presentation"
         >
           <div
@@ -356,19 +345,17 @@ const AppWithDashboards: React.FC = () => {
             aria-modal="true"
             aria-label="Keyboard shortcuts"
           >
-            <h2 className="mb-4 text-lg font-semibold text-white">Keyboard Shortcuts</h2>
+            <h2 className="mb-4 text-lg font-semibold text-white">Keyboard shortcuts</h2>
             <ul className="space-y-2 text-sm text-slate-300">
               <li><kbd className="rounded bg-slate-700 px-2 py-0.5">R</kbd> Refresh dashboard</li>
+              <li><kbd className="rounded bg-slate-700 px-2 py-0.5">F</kbd> Command center fullscreen</li>
               <li><kbd className="rounded bg-slate-700 px-2 py-0.5">/</kbd> Focus schedule search</li>
+              <li><kbd className="rounded bg-slate-700 px-2 py-0.5">Esc</kbd> Exit command center</li>
               <li><kbd className="rounded bg-slate-700 px-2 py-0.5">Shift</kbd> + <kbd className="rounded bg-slate-700 px-2 py-0.5">?</kbd> Show this help</li>
             </ul>
-            <button
-              type="button"
-              onClick={() => setShowShortcutHelp(false)}
-              className="mt-4 w-full rounded bg-primary py-2 text-sm text-white hover:bg-primary-light"
-            >
+            <Button variant="primary" className="mt-4 w-full" onClick={() => setShowShortcutHelp(false)}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
       )}
