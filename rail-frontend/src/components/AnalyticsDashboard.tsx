@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, PieChart, TrendingUp, AlertCircle, Clock, Train, Settings, RefreshCw } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  Cell,
+  Pie,
+  PieChart as RechartsPie,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 interface AnalyticsData {
   summary: {
@@ -105,7 +116,7 @@ const AnalyticsDashboard: React.FC = () => {
 
   if (loading && !analytics) {
     return (
-      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
+      <div className="flex min-h-[60vh] items-center justify-center bg-surface-1 text-white">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
           <p>Loading analytics...</p>
@@ -116,7 +127,7 @@ const AnalyticsDashboard: React.FC = () => {
 
   if (!analytics) {
     return (
-      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
+      <div className="flex min-h-[60vh] items-center justify-center bg-surface-1 text-white">
         <div className="text-center">
           <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
           <p>No analytics data available</p>
@@ -147,8 +158,25 @@ const AnalyticsDashboard: React.FC = () => {
     }
   };
 
+  const stationChartData = Object.entries(analytics.delays_by_station).map(([station, delay]) => ({
+    station,
+    delay: Number(delay.toFixed(1)),
+  }));
+
+  const typeChartData = Object.entries(analytics.delays_by_train_type).map(([type, delay]) => ({
+    name: type,
+    value: Number(delay.toFixed(1)),
+  }));
+
+  const conflictTypeData = Object.entries(analytics.conflicts_analysis.by_type).map(([type, count]) => ({
+    name: type.replace('_', ' '),
+    value: count,
+  }));
+
+  const PIE_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4'];
+
   return (
-    <div className="min-h-screen bg-slate-900 text-white p-6">
+    <div className="min-h-screen bg-surface-1 p-6 text-white">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
@@ -179,7 +207,7 @@ const AnalyticsDashboard: React.FC = () => {
 
         {/* Key Performance Indicators */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-slate-800 rounded-lg p-6">
+          <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
             <div className="flex items-center justify-between mb-2">
               <Train className="w-8 h-8 text-blue-400" />
               <span className="text-2xl font-bold">{analytics.summary.total_trains}</span>
@@ -187,7 +215,7 @@ const AnalyticsDashboard: React.FC = () => {
             <h3 className="text-slate-400 text-sm">Total Trains</h3>
           </div>
 
-          <div className="bg-slate-800 rounded-lg p-6">
+          <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
             <div className="flex items-center justify-between mb-2">
               <Clock className="w-8 h-8 text-green-400" />
               <span className={`text-2xl font-bold ${getPerformanceColor(analytics.summary.on_time_percentage)}`}>
@@ -200,7 +228,7 @@ const AnalyticsDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-slate-800 rounded-lg p-6">
+          <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
             <div className="flex items-center justify-between mb-2">
               <TrendingUp className="w-8 h-8 text-yellow-400" />
               <span className="text-2xl font-bold">{analytics.summary.average_delay_minutes.toFixed(1)}m</span>
@@ -211,7 +239,7 @@ const AnalyticsDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-slate-800 rounded-lg p-6">
+          <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
             <div className="flex items-center justify-between mb-2">
               <AlertCircle className="w-8 h-8 text-red-400" />
               <span className="text-2xl font-bold">{analytics.conflicts_analysis.total_conflicts}</span>
@@ -225,65 +253,60 @@ const AnalyticsDashboard: React.FC = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           {/* Delays by Station */}
-          <div className="bg-slate-800 rounded-lg p-6">
+          <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
               <BarChart3 className="w-5 h-5" />
               Delays by Station
             </h2>
-            <div className="space-y-3">
-              {Object.entries(analytics.delays_by_station).map(([station, delay]) => (
-                <div key={station} className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{station}</span>
-                  <div className="flex items-center gap-3">
-                    <div className="w-32 bg-slate-700 rounded-full h-2">
-                      <div 
-                        className="bg-blue-500 h-2 rounded-full" 
-                        style={{ 
-                          width: `${Math.min(100, (delay / Math.max(...Object.values(analytics.delays_by_station))) * 100)}%` 
-                        }}
-                      ></div>
-                    </div>
-                    <span className="text-sm text-slate-400 w-12 text-right">
-                      {delay.toFixed(1)}m
-                    </span>
-                  </div>
-                </div>
-              ))}
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stationChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <XAxis dataKey="station" stroke="#94a3b8" fontSize={12} />
+                  <YAxis stroke="#94a3b8" fontSize={12} unit="m" />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }}
+                    labelStyle={{ color: '#f1f5f9' }}
+                  />
+                  <Bar dataKey="delay" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Delay (min)" />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
 
           {/* Delays by Train Type */}
-          <div className="bg-slate-800 rounded-lg p-6">
+          <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
               <PieChart className="w-5 h-5" />
               Delays by Train Type
             </h2>
-            <div className="space-y-3">
-              {Object.entries(analytics.delays_by_train_type).map(([type, delay]) => (
-                <div key={type} className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{type}</span>
-                  <div className="flex items-center gap-3">
-                    <div className="w-32 bg-slate-700 rounded-full h-2">
-                      <div 
-                        className="bg-green-500 h-2 rounded-full" 
-                        style={{ 
-                          width: `${Math.min(100, (delay / Math.max(...Object.values(analytics.delays_by_train_type))) * 100)}%` 
-                        }}
-                      ></div>
-                    </div>
-                    <span className="text-sm text-slate-400 w-12 text-right">
-                      {delay.toFixed(1)}m
-                    </span>
-                  </div>
-                </div>
-              ))}
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <RechartsPie>
+                  <Pie
+                    data={typeChartData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={90}
+                    label={({ name, value }) => `${name}: ${value}m`}
+                  >
+                    {typeChartData.map((_, index) => (
+                      <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }}
+                  />
+                </RechartsPie>
+              </ResponsiveContainer>
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           {/* Platform Utilization */}
-          <div className="bg-slate-800 rounded-lg p-6">
+          <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
             <h2 className="text-xl font-semibold mb-4">Platform Utilization</h2>
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {Object.entries(analytics.platform_utilization)
@@ -308,31 +331,41 @@ const AnalyticsDashboard: React.FC = () => {
           </div>
 
           {/* Conflicts by Type */}
-          <div className="bg-slate-800 rounded-lg p-6">
+          <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
             <h2 className="text-xl font-semibold mb-4">Conflicts by Type</h2>
-            <div className="space-y-3">
-              {Object.entries(analytics.conflicts_analysis.by_type).map(([type, count]) => (
-                <div key={type} className="flex items-center justify-between">
-                  <span className="text-sm font-medium capitalize">
-                    {type.replace('_', ' ')}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="bg-red-600 text-white text-xs px-2 py-1 rounded">
-                      {count}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {Object.keys(analytics.conflicts_analysis.by_type).length === 0 && (
-                <div className="text-center text-slate-400 py-4">
-                  No conflicts detected
-                </div>
-              )}
-            </div>
+            {conflictTypeData.length > 0 ? (
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RechartsPie>
+                    <Pie
+                      data={conflictTypeData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={40}
+                      outerRadius={70}
+                      label
+                    >
+                      {conflictTypeData.map((_, index) => (
+                        <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }}
+                    />
+                  </RechartsPie>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="text-center text-slate-400 py-4">
+                No conflicts detected
+              </div>
+            )}
           </div>
 
           {/* Conflicts by Severity */}
-          <div className="bg-slate-800 rounded-lg p-6">
+          <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
             <h2 className="text-xl font-semibold mb-4">Conflicts by Severity</h2>
             <div className="space-y-3">
               {Object.entries(analytics.conflicts_analysis.by_severity).map(([severity, count]) => (

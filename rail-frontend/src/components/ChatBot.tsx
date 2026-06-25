@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Bot, X } from 'lucide-react';
+import { Send, X } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -77,15 +77,15 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
       setMessages(prev => [...prev, autoMessage]);
 
       // Trigger AI response
-      handleAutoExplanation(autoExplanationPrompt);
+      handleAutoExplanation();
     }
   }, [autoExplain, lastAction, hasAutoExplained]);
 
-  const handleAutoExplanation = async (prompt: string) => {
+  const handleAutoExplanation = async () => {
     setIsLoading(true);
 
     try {
-      const apiKey = 'AIzaSyBuLZBgvKK9a1q1S_ggpSOeQ2D10wWaPdM';
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) {
         throw new Error('API key is not configured');
       }
@@ -229,7 +229,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
     setIsLoading(true);
 
     try {
-      const apiKey = 'AIzaSyCD8h5TjkB40XBwjybfKDmc9GPGb2Q2COE';
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) {
         throw new Error('API key is not configured');
       }
@@ -360,35 +360,36 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
   };
 
   return (
-    <div className="fixed bottom-4 right-4 w-96 bg-white rounded-lg shadow-xl flex flex-col" style={{ height: '600px' }}>
-      <div className="bg-blue-600 text-white p-4 rounded-t-lg flex justify-between items-center">
+    <div className="fixed bottom-4 right-4 z-50 flex w-96 flex-col rounded-lg border border-slate-600 bg-surface-2 shadow-xl" style={{ height: '600px' }}>
+      <div className="flex items-center justify-between rounded-t-lg bg-primary p-4 text-white">
         <div className="flex items-center space-x-2">
-          <img src="/train-logo.png" alt="TrainVision AI" className="w-5 h-5 filter brightness-0 invert" />
+          <img src="/train-logo.png" alt="TrainVision AI" className="h-5 w-5 brightness-0 invert" />
           <h3 className="font-semibold">TrainVision AI Assistant</h3>
         </div>
         <button
           onClick={onClose}
-          className="text-white hover:bg-blue-700 p-1 rounded-full"
+          className="rounded-full p-1 text-white hover:bg-primary-light"
           aria-label="Close chat"
         >
-          <X className="w-5 h-5" />
+          <X className="h-5 w-5" />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 space-y-4 overflow-y-auto p-4">
         {messages?.map((message) => (
           <div
             key={message.id}
             className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg p-3 ${message.sender === 'user'
-                ? 'bg-blue-100 text-blue-900'
-                : 'bg-gray-100 text-gray-800'
-                }`}
+              className={`max-w-[80%] rounded-lg p-3 ${
+                message.sender === 'user'
+                  ? 'bg-primary text-white'
+                  : 'border border-slate-600 bg-surface-3 text-slate-100'
+              }`}
             >
               <p className="whitespace-pre-line">{message.text}</p>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className={`mt-1 text-xs ${message.sender === 'user' ? 'text-blue-100' : 'text-slate-400'}`}>
                 {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>
             </div>
@@ -396,11 +397,11 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
         ))}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 rounded-lg p-3 max-w-[80%]">
+            <div className="max-w-[80%] rounded-lg border border-slate-600 bg-surface-3 p-3">
               <div className="flex space-x-2">
-                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '0ms' }} />
+                <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '150ms' }} />
+                <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '300ms' }} />
               </div>
             </div>
           </div>
@@ -408,7 +409,7 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-4 border-t">
+      <div className="border-t border-slate-600 p-4">
         <div className="flex items-end space-x-2">
           <textarea
             ref={textareaRef}
@@ -416,20 +417,20 @@ export function ChatBot({ logsBefore, logsAfter, scheduleData, lastAction, autoE
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask about the optimization results..."
-            className="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+            className="flex-1 rounded-lg border border-slate-600 bg-slate-900 p-3 text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary"
             disabled={isLoading}
             rows={1}
           />
           <button
             onClick={handleSend}
             disabled={isLoading || !input.trim()}
-            className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="rounded-lg bg-primary p-3 text-white transition-colors hover:bg-primary-light disabled:opacity-50"
           >
-            <Send className="w-5 h-5" />
+            <Send className="h-5 w-5" />
           </button>
         </div>
-        <p className="text-xs text-gray-500 mt-2 text-center">
-          Powered by Gemini AI • Try asking: "Explain what happened at HYB station" or "Why was this train moved?"
+        <p className="mt-2 text-center text-xs text-slate-400">
+          Powered by Gemini AI • Try: &quot;Explain what happened at HYB station&quot;
         </p>
       </div>
     </div>

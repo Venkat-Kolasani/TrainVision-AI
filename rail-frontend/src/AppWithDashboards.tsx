@@ -5,74 +5,64 @@ import {
   Play,
   Bot,
   AlertTriangle,
-  Lightbulb
+  Lightbulb,
+  ClipboardList,
+  RefreshCw,
+  RotateCcw,
+  Wifi,
+  WifiOff,
+  Clock,
 } from 'lucide-react';
 import App from './App';
 import SimulationDashboard from './components/SimulationDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import { ChatBot } from './components/ChatBot';
+import { ConfirmDialog } from './components/ui/ConfirmDialog';
+import { RecommendationsPanel } from './components/operations/RecommendationsPanel';
+import { notify } from './lib/notify';
+import { useDashboardShell } from './context/DashboardShellContext';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { getConflictCount } from './lib/apiNormalize';
+import type { Recommendation, ConflictsResponse, ConflictItem } from './types/railway';
 
 type DashboardView = 'main' | 'simulation' | 'analytics';
 
-
-interface Conflict {
-  id: string;
-  type: string;
-  station_id: string;
-  platform?: number;
-  trains_involved: string[];
-  root_cause: string;
-  severity: string;
-  suggested_actions: string[];
-}
-
-interface Recommendation {
-  id: string;
-  action_type: string;
-  description: string;
-  train_id: string;
-  station_id?: string;
-  new_platform?: number;
-  delay_minutes?: number;
-  cost_benefit: {
-    delay_reduction: number;
-    conflicts_resolved: number;
-    cost_score: number;
-  };
-  impact: {
-    affected_trains: string[];
-    total_delay_change: number;
-  };
-}
+const healthStyles = {
+  OPTIMAL: 'text-success bg-success/10 border-success/30',
+  DELAYS: 'text-warning bg-warning/10 border-warning/30',
+  CONFLICTS: 'text-danger bg-danger/10 border-danger/30',
+} as const;
 
 const AppWithDashboards: React.FC = () => {
+  const { status, actions } = useDashboardShell();
   const [currentView, setCurrentView] = useState<DashboardView>('main');
   const [showChatBot, setShowChatBot] = useState(false);
-  const [conflicts, setConflicts] = useState<Conflict[]>([]);
+  const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [showRecommendationsPanel, setShowRecommendationsPanel] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [applyingRecId, setApplyingRecId] = useState<string | null>(null);
+  const [shellConflicts, setShellConflicts] = useState<ConflictsResponse>({});
 
-  // Add state for ChatBot data
-  const [scheduleData, setScheduleData] = useState<any>(null);
-  const [logs, setLogs] = useState<any[]>([]);
-  const [lastAction, setLastAction] = useState<string | null>(null);
+  const [scheduleData, setScheduleData] = useState<unknown>(null);
+  const [logs, setLogs] = useState<unknown[]>([]);
 
   const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   useEffect(() => {
-    // Fetch all data periodically
     const interval = setInterval(() => {
-      fetchConflicts();
-      fetchRecommendations();
-      fetchScheduleData();
-      fetchLogs();
-    }, 10000); // Every 10 seconds
+      void fetchConflicts();
+      void fetchRecommendations();
+      void fetchScheduleData();
+      void fetchLogs();
+    }, 10000);
 
-    // Initial fetch
-    fetchConflicts();
-    fetchRecommendations();
-    fetchScheduleData();
-    fetchLogs();
+    void fetchConflicts();
+    void fetchRecommendations();
+    void fetchScheduleData();
+    void fetchLogs();
 
     return () => clearInterval(interval);
   }, []);
@@ -81,7 +71,8 @@ const AppWithDashboards: React.FC = () => {
     try {
       const response = await fetch(`${API_BASE}/conflicts`);
       if (response.ok) {
-        const data = await response.json();
+        const data: ConflictsResponse = await response.json();
+        setShellConflicts(data);
         setConflicts(data.conflicts || []);
       }
     } catch (error) {
@@ -115,7 +106,7 @@ const AppWithDashboards: React.FC = () => {
 
   const fetchLogs = async () => {
     try {
-      const response = await fetch(`${API_BASE}/log`);  // Note: singular 'log'
+      const response = await fetch(`${API_BASE}/log`);
       if (response.ok) {
         const data = await response.json();
         setLogs(data);
@@ -125,99 +116,207 @@ const AppWithDashboards: React.FC = () => {
     }
   };
 
-
   const applyRecommendation = async (recommendationId: string) => {
+    setApplyingRecId(recommendationId);
     try {
-      const response = await fetch(`${API_BASE}/apply-recommendation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recommendation_id: recommendationId })
-      });
+      const response = await fetch(
+        `${API_BASE}/apply-recommendation?recommendation_id=${encodeURIComponent(recommendationId)}`,
+        { method: 'POST' }
+      );
 
       if (response.ok) {
-        await fetchRecommendations(); // Refresh recommendations
-        alert('Recommendation applied successfully!');
+        await Promise.all([fetchRecommendations(), fetchConflicts(), fetchScheduleData()]);
+        if (actions?.refreshAll) await actions.refreshAll();
+        notify.success('Recommendation applied successfully');
+      } else {
+        const err = await response.json().catch(() => ({}));
+        notify.error('Failed to apply recommendation', err.detail || 'Unknown error');
       }
     } catch (error) {
       console.error('Error applying recommendation:', error);
-      alert('Failed to apply recommendation');
+      notify.error('Failed to apply recommendation');
+    } finally {
+      setApplyingRecId(null);
     }
   };
 
+  const handleRefresh = async () => {
+    if (!actions?.refreshAll) return;
+    setRefreshing(true);
+    try {
+      await actions.refreshAll();
+      notify.success('Dashboard refreshed');
+    } catch {
+      notify.error('Failed to refresh dashboard');
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
+  const handleReset = async () => {
+    if (!actions?.resetSystem) return;
+    try {
+      await actions.resetSystem();
+      setShowResetConfirm(false);
+    } catch {
+      notify.error('Failed to reset system');
+    }
+  };
+
+  useKeyboardShortcuts({
+    onRefresh: () => {
+      if (!actions?.refreshAll) return;
+      setRefreshing(true);
+      void actions.refreshAll()
+        .then(() => notify.success('Dashboard refreshed'))
+        .catch(() => notify.error('Failed to refresh dashboard'))
+        .finally(() => setRefreshing(false));
+    },
+    onSearch: () => {
+      const searchInput = document.querySelector<HTMLInputElement>('input[type="search"]');
+      searchInput?.focus();
+    },
+    onHelp: () => setShowShortcutHelp(true),
+  });
+
+  const shellConflictCount = getConflictCount(shellConflicts);
+
+  const lastSyncLabel = status.lastSync
+    ? status.lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '—';
 
   const renderNavigation = () => (
-    <div className="bg-slate-800 border-b border-slate-700 px-6 py-4">
-      <div className="flex items-center justify-between">
+    <header className="border-b border-slate-700 bg-surface-2">
+      <div className="flex items-center justify-between px-6 py-3">
         <div className="flex items-center space-x-6">
           <div className="flex items-center space-x-3">
-            <img src="/train-logo.png" alt="TrainVision AI" className="w-8 h-8" />
-            <h1 className="text-xl font-bold text-white">TrainVision AI</h1>
+            <img src="/train-logo.png" alt="TrainVision AI" className="h-8 w-8" />
+            <div>
+              <h1 className="text-lg font-semibold text-white">TrainVision AI</h1>
+              <p className="text-xs text-slate-400">Operations Console</p>
+            </div>
           </div>
-          <nav className="flex space-x-4">
-            <button
-              onClick={() => setCurrentView('main')}
-              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${currentView === 'main'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-300 hover:text-white hover:bg-slate-700'
+          <nav className="flex space-x-1" aria-label="Main navigation">
+            {(
+              [
+                { id: 'main' as const, label: 'Operations', icon: Home },
+                { id: 'simulation' as const, label: 'Simulation', icon: Play },
+                { id: 'analytics' as const, label: 'Analytics', icon: BarChart3 },
+              ] as const
+            ).map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setCurrentView(id)}
+                className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                  currentView === id
+                    ? 'bg-primary text-white'
+                    : 'text-slate-300 hover:bg-slate-700 hover:text-white'
                 }`}
-            >
-              <Home className="w-4 h-4" />
-              Main Dashboard
-            </button>
-            <button
-              onClick={() => setCurrentView('simulation')}
-              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${currentView === 'simulation'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-300 hover:text-white hover:bg-slate-700'
-                }`}
-            >
-              <Play className="w-4 h-4" />
-              Simulation
-            </button>
-            <button
-              onClick={() => setCurrentView('analytics')}
-              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${currentView === 'analytics'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-300 hover:text-white hover:bg-slate-700'
-                }`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              Analytics
-            </button>
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+              </button>
+            ))}
           </nav>
         </div>
 
-        <div className="flex items-center space-x-4">
-          {/* Conflicts Indicator */}
-          {conflicts.length > 0 && (
-            <div className="flex items-center gap-2 bg-red-900/30 border border-red-600 rounded px-3 py-1">
-              <AlertTriangle className="w-4 h-4 text-red-400" />
-              <span className="text-red-400 text-sm">{conflicts.length} conflicts</span>
+        <div className="flex items-center space-x-3">
+          {(shellConflictCount > 0 || conflicts.length > 0) && (
+            <div className="flex items-center gap-2 rounded border border-danger/40 bg-danger/10 px-3 py-1.5">
+              <AlertTriangle className="h-4 w-4 text-danger" />
+              <span className="text-sm text-danger">
+                {Math.max(shellConflictCount, conflicts.length)} conflicts
+              </span>
             </div>
           )}
 
-          {/* Recommendations Indicator */}
           {recommendations.length > 0 && (
             <button
-              onClick={() => setShowRecommendationsPanel(true)}
-              className="flex items-center gap-2 bg-blue-900/30 border border-blue-600 rounded px-3 py-1 hover:bg-blue-900/50 transition-colors"
+              type="button"
+              onClick={() => setShowRecommendationsPanel((open) => !open)}
+              className={`flex items-center gap-2 rounded border px-3 py-1.5 transition-colors ${
+                showRecommendationsPanel
+                  ? 'border-info bg-info/20 text-info'
+                  : 'border-info/40 bg-info/10 text-info hover:bg-info/20'
+              }`}
             >
-              <Lightbulb className="w-4 h-4 text-blue-400" />
-              <span className="text-blue-400 text-sm">{recommendations.length} recommendations</span>
+              <Lightbulb className="h-4 w-4 text-info" />
+              <span className="text-sm text-info">{recommendations.length} recommendations</span>
             </button>
           )}
 
+          {currentView === 'main' && (
+            <>
+              <button
+                type="button"
+                onClick={() => actions?.openAuditLogs()}
+                className="flex items-center gap-2 rounded bg-slate-700 px-3 py-2 text-sm text-white transition-colors hover:bg-slate-600"
+              >
+                <ClipboardList className="h-4 w-4" />
+                Audit Logs
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRefresh()}
+                disabled={refreshing}
+                className="flex items-center gap-2 rounded bg-success px-3 py-2 text-sm text-white transition-colors hover:bg-success-dark disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowResetConfirm(true)}
+                className="flex items-center gap-2 rounded bg-danger/90 px-3 py-2 text-sm text-white transition-colors hover:bg-danger"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Reset
+              </button>
+            </>
+          )}
+
           <button
+            type="button"
             onClick={() => setShowChatBot(true)}
-            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded transition-colors"
+            className="flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm text-white transition-colors hover:bg-primary-light"
           >
-            <Bot className="w-4 h-4" />
+            <Bot className="h-4 w-4" />
             AI Assistant
           </button>
         </div>
       </div>
-    </div>
+
+      {currentView === 'main' && (
+        <div className="flex flex-wrap items-center gap-4 border-t border-slate-700/80 bg-surface-1 px-6 py-2 text-xs text-slate-300">
+          <div className="flex items-center gap-1.5">
+            {status.websocketConnected ? (
+              <Wifi className="h-3.5 w-3.5 text-success" />
+            ) : (
+              <WifiOff className="h-3.5 w-3.5 text-danger" />
+            )}
+            <span>{status.websocketConnected ? 'Live connection' : 'Disconnected'}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 text-slate-400" />
+            <span>Last sync: {lastSyncLabel}</span>
+          </div>
+          <div
+            className={`rounded border px-2 py-0.5 font-medium ${healthStyles[status.systemHealth]}`}
+          >
+            {status.systemHealth}
+          </div>
+          <span>{status.trainCount} trains</span>
+          <span>{status.onTimePct}% on-time</span>
+          {status.conflictCount > 0 && (
+            <span className="text-danger">{status.conflictCount} active conflicts</span>
+          )}
+          {status.activeDelayCount > 0 && (
+            <span className="text-warning">{status.activeDelayCount} active delays</span>
+          )}
+        </div>
+      )}
+    </header>
   );
 
   const renderContent = () => {
@@ -232,98 +331,68 @@ const AppWithDashboards: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900">
+    <div className={`min-h-screen bg-surface-1 transition-[padding] ${showRecommendationsPanel ? 'lg:pr-[28rem]' : ''}`}>
       {renderNavigation()}
       {renderContent()}
 
-      {/* Enhanced ChatBot */}
+      <RecommendationsPanel
+        open={showRecommendationsPanel}
+        recommendations={recommendations}
+        onClose={() => setShowRecommendationsPanel(false)}
+        onApply={(id) => void applyRecommendation(id)}
+        applyingId={applyingRecId}
+      />
+
+      {showShortcutHelp && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowShortcutHelp(false)}
+          onKeyDown={(e) => e.key === 'Escape' && setShowShortcutHelp(false)}
+          role="presentation"
+        >
+          <div
+            className="w-full max-w-sm rounded-lg border border-slate-600 bg-surface-2 p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Keyboard shortcuts"
+          >
+            <h2 className="mb-4 text-lg font-semibold text-white">Keyboard Shortcuts</h2>
+            <ul className="space-y-2 text-sm text-slate-300">
+              <li><kbd className="rounded bg-slate-700 px-2 py-0.5">R</kbd> Refresh dashboard</li>
+              <li><kbd className="rounded bg-slate-700 px-2 py-0.5">/</kbd> Focus schedule search</li>
+              <li><kbd className="rounded bg-slate-700 px-2 py-0.5">Shift</kbd> + <kbd className="rounded bg-slate-700 px-2 py-0.5">?</kbd> Show this help</li>
+            </ul>
+            <button
+              type="button"
+              onClick={() => setShowShortcutHelp(false)}
+              className="mt-4 w-full rounded bg-primary py-2 text-sm text-white hover:bg-primary-light"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
       {showChatBot && (
         <ChatBot
           onClose={() => setShowChatBot(false)}
-          logsBefore={logs}
-          logsAfter={logs}
-          scheduleData={scheduleData}
-          lastAction={lastAction}
+          logsBefore={logs as never[]}
+          logsAfter={logs as never[]}
+          scheduleData={scheduleData as never}
+          lastAction={null}
           autoExplain={false}
         />
       )}
 
-      {/* Recommendations Panel */}
-      {showRecommendationsPanel && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-4xl max-h-[80vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-                <Lightbulb className="w-5 h-5" />
-                AI Recommendations
-              </h2>
-              <button
-                onClick={() => setShowRecommendationsPanel(false)}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {recommendations.map((rec) => (
-                <div key={rec.id} className="bg-slate-700 rounded-lg p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h3 className="font-medium text-white mb-1">{rec.description}</h3>
-                      <div className="text-sm text-slate-400">
-                        Train: {rec.train_id} • Action: {rec.action_type.replace('_', ' ')}
-                        {rec.station_id && ` • Station: ${rec.station_id}`}
-                        {rec.new_platform && ` • Platform: ${rec.new_platform}`}
-                        {rec.delay_minutes && ` • Delay: ${rec.delay_minutes}min`}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm font-medium text-green-400">
-                        Score: {(rec.cost_benefit.cost_score * 100).toFixed(0)}%
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {rec.cost_benefit.conflicts_resolved} conflicts resolved
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 mb-3">
-                    <div className="bg-slate-600 rounded p-2">
-                      <div className="text-xs text-slate-400">Impact</div>
-                      <div className="text-sm">
-                        {rec.impact.affected_trains.length} trains •
-                        {rec.impact.total_delay_change > 0 ? '+' : ''}{rec.impact.total_delay_change.toFixed(1)}min
-                      </div>
-                    </div>
-                    <div className="bg-slate-600 rounded p-2">
-                      <div className="text-xs text-slate-400">Benefit</div>
-                      <div className="text-sm">
-                        {rec.cost_benefit.delay_reduction > 0 ? '+' : ''}{rec.cost_benefit.delay_reduction.toFixed(1)}min saved
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => applyRecommendation(rec.id)}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm"
-                  >
-                    Apply Recommendation
-                  </button>
-                </div>
-              ))}
-
-              {recommendations.length === 0 && (
-                <div className="text-center text-slate-400 py-8">
-                  <Lightbulb className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>No recommendations available at this time.</p>
-                  <p className="text-sm">The system will generate suggestions as conflicts arise.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={showResetConfirm}
+        title="Reset system?"
+        message="This will clear all overrides and regenerate the baseline schedule. This action cannot be undone."
+        confirmLabel="Reset system"
+        variant="danger"
+        onConfirm={() => void handleReset()}
+        onCancel={() => setShowResetConfirm(false)}
+      />
     </div>
   );
 };

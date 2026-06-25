@@ -1,6 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-import { Bot } from 'lucide-react';
-import { ChatBot } from './components/ChatBot';
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { notify } from './lib/notify';
+import { useDashboardShell } from './context/DashboardShellContext';
+import { ConfirmDialog } from './components/ui/ConfirmDialog';
+import { KpiSkeleton, MapSkeleton, TableSkeleton } from './components/ui/Skeleton';
+import { KpiStrip } from './components/operations/KpiStrip';
+import { AlertsPanel } from './components/operations/AlertsPanel';
+import { ScheduleTable } from './components/operations/ScheduleTable';
+import { QuickActionsPanel } from './components/operations/QuickActionsPanel';
+import { GanttChart } from './components/operations/GanttChart';
+import { TrainDetailDrawer } from './components/operations/TrainDetailDrawer';
+import { computeKPIs as computeScheduleKPIs } from './lib/scheduleUtils';
+import { getConflictCount, normalizeActiveDelays } from './lib/apiNormalize';
+import type { ScheduleEntry as ScheduleEntryType, ActiveDelay, ConflictsResponse } from './types/railway';
 
 // TypeScript interfaces for data
 interface Train {
@@ -80,20 +91,29 @@ export default function App() {
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [nowClock, setNowClock] = useState(new Date());
   const [animTick, setAnimTick] = useState(0);
-  const [showChatBot, setShowChatBot] = useState(false);
-  const [lastOverrideAction, setLastOverrideAction] = useState<string | null>(null);
-  const [autoExplanationTriggered, setAutoExplanationTriggered] = useState(false);
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [selectedDelayTrain, setSelectedDelayTrain] = useState<string | null>(null);
   const [delayType, setDelayType] = useState<string>("breakdown");
   const [delayMinutes, setDelayMinutes] = useState<number>(15);
   const [delayReason, setDelayReason] = useState<string>("");
-  const [activeDelays, setActiveDelays] = useState<any[]>([]);
+  const [activeDelays, setActiveDelays] = useState<ActiveDelay[]>([]);
   const [trainPositions, setTrainPositions] = useState<any[]>([]);
   const [websocketConnected, setWebsocketConnected] = useState(false);
-  const [ws, setWs] = useState<WebSocket | null>(null);
-  const [conflicts, setConflicts] = useState<any>({});
+  const [conflicts, setConflicts] = useState<ConflictsResponse>({});
   const [trackStatus, setTrackStatus] = useState<any>({});
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [showClearDelaysConfirm, setShowClearDelaysConfirm] = useState(false);
+  const [ganttSelectedEntry, setGanttSelectedEntry] = useState<ScheduleEntryType | null>(null);
+
+  const scheduleRef = useRef(schedule);
+  scheduleRef.current = schedule;
+
+  const { updateStatus, registerActions, unregisterActions } = useDashboardShell();
+
+  const markSync = useCallback(() => {
+    setLastSync(new Date());
+  }, []);
 
   // Removed conflict banner/context; app runs only on HYB–VSKP dataset
 
@@ -106,8 +126,6 @@ export default function App() {
     const actual = new Date(entry.actual_arrival).getTime();
     return actual - scheduled > 2 * 60 * 1000; // >2 min delay
   };
-  const isOverridden = (entry: ScheduleEntry) =>
-    Boolean(entry.reason && entry.reason.toLowerCase().includes("fixed to p"));
 
   const colorByType: Record<string, string> = {
     Express: "#3b82f6", // blue
@@ -127,7 +145,7 @@ export default function App() {
   // Fetch stations from backend
   async function fetchStations() {
     try {
-      const res = await fetch('http://localhost:8000/stations');
+      const res = await fetch(`${API_BASE}/stations`);
       if (res.ok) {
         const backendStations = await res.json();
         // Map backend stations to our Station interface with Hyderabad station details
@@ -502,7 +520,7 @@ export default function App() {
                     cx={0} cy={-10} r={4} fill="#ef4444" 
                     className="animate-pulse cursor-pointer" 
                     onClick={() => {
-                      alert(`🚨 DELAYED TRAIN: ${t.id}\n\nReason: ${t.waitReason || 'Platform conflict'}\nClick OK to see resolution options.`);
+                      notify.warning(`Delayed train: ${t.id}`, t.waitReason || 'Platform conflict');
                     }}
                   >
                     <animate attributeName="r" values="3;5;3" dur="1.5s" repeatCount="indefinite" />
@@ -514,7 +532,7 @@ export default function App() {
                     cx={0} cy={-10} r={3} fill="#fbbf24" 
                     className="animate-bounce cursor-pointer"
                     onClick={() => {
-                      alert(`⏳ WAITING: ${t.id}\n\nStatus: ${t.waitReason || 'Awaiting departure'}\nTrack: ${t.trackNumber || 'N/A'}`);
+                      notify.info(`Waiting: ${t.id}`, `${t.waitReason || 'Awaiting departure'} • Track ${t.trackNumber || 'N/A'}`);
                     }}
                   />
                 )}
@@ -524,7 +542,7 @@ export default function App() {
                     cx={0} cy={-10} r={2} fill="#22c55e" 
                     className="cursor-pointer"
                     onClick={() => {
-                      alert(`🚂 MOVING: ${t.id}\n\nTrack: ${t.trackNumber || 'N/A'}\nStatus: En route between stations`);
+                      notify.info(`Moving: ${t.id}`, `Track ${t.trackNumber || 'N/A'} • En route between stations`);
                     }}
                   />
                 )}
@@ -599,7 +617,7 @@ export default function App() {
               const t = getTrain(e.train_id);
               const st = statusFor(e);
               return (
-                <tr key={e.train_id} className="border-t border-slate-800">
+                <tr key={`${e.train_id}-${e.station_id}`} className="border-t border-slate-800">
                   <td className="py-1 pr-2 font-medium text-slate-100">{e.train_id}</td>
                   <td className="py-1 pr-2 text-slate-300">{t?.type || "-"}</td>
                   <td className="py-1 pr-2">
@@ -623,14 +641,16 @@ export default function App() {
   // Removed conflict override banner logic
 
   // WebSocket connection
+  const wsRef = useRef<WebSocket | null>(null);
+
   useEffect(() => {
     const connectWebSocket = () => {
-      const websocket = new WebSocket('ws://localhost:8000/ws');
+      const websocket = new WebSocket(`${API_BASE.replace(/^http/, 'ws')}/ws`);
       
       websocket.onopen = () => {
         console.log('WebSocket connected');
         setWebsocketConnected(true);
-        setWs(websocket);
+        wsRef.current = websocket;
       };
       
       websocket.onmessage = (event) => {
@@ -649,8 +669,7 @@ export default function App() {
       websocket.onclose = () => {
         console.log('WebSocket disconnected');
         setWebsocketConnected(false);
-        setWs(null);
-        // Reconnect after 3 seconds
+        wsRef.current = null;
         setTimeout(connectWebSocket, 3000);
       };
       
@@ -663,29 +682,33 @@ export default function App() {
     connectWebSocket();
     
     return () => {
-      if (ws) {
-        ws.close();
-      }
+      wsRef.current?.close();
+      wsRef.current = null;
     };
   }, []);
 
   // polling / refresh interval
   useEffect(() => {
-    // Fetch initial data from backend
-    fetchStations();
-    fetchDataset();
-    fetchSchedule();
-    fetchLogs();
-    fetchActiveDelays();
-    fetchTrainPositions();
-    fetchConflicts();
-    fetchTrackStatus();
+    const loadInitial = async () => {
+      await Promise.all([
+        fetchStations(),
+        fetchDataset(),
+        fetchSchedule(),
+        fetchLogs(),
+        fetchActiveDelays(),
+        fetchTrainPositions(),
+        fetchConflicts(),
+        fetchTrackStatus(),
+      ]);
+      setInitialLoadComplete(true);
+    };
+    void loadInitial();
     const t = setInterval(() => {
-      fetchSchedule();
-      fetchActiveDelays();
-      fetchTrainPositions();
-      fetchConflicts();
-      fetchTrackStatus();
+      void fetchSchedule(true);
+      void fetchActiveDelays();
+      void fetchTrainPositions();
+      void fetchConflicts();
+      void fetchTrackStatus();
       setNowClock(new Date());
     }, 3000);
     const a = setInterval(() => setAnimTick((v) => v + 1), 150);
@@ -697,40 +720,15 @@ export default function App() {
       const r = await fetch(`${API_BASE}/trains`);
       if (!r.ok) return;
       const data = await r.json();
-      // If backend returns trains only, we have to request stations separately if you implemented /stations
-      // For prototype we expect the backend to include dataset in initial load; if not, define local stations
       setTrains(data);
-
-      // try to load stations from a dedicated endpoint; fallback to inline
-      try {
-        const s = await fetch(`${API_BASE}/stations`);
-        if (s.ok) {
-          const st = await s.json();
-          setStations(st);
-        } else {
-          // fallback static (match backend prototype)
-          setStations([
-            { id: "StationA", platforms: 2 },
-            { id: "StationB", platforms: 2 },
-            { id: "StationC", platforms: 1 },
-            { id: "StationD", platforms: 2 },
-          ]);
-        }
-      } catch (err) {
-        setStations([
-          { id: "StationA", platforms: 2 },
-          { id: "StationB", platforms: 2 },
-          { id: "StationC", platforms: 1 },
-          { id: "StationD", platforms: 2 },
-        ]);
-      }
+      markSync();
     } catch (e) {
       console.error(e);
     }
   }
 
-  async function fetchSchedule() {
-    setLoading(true);
+  async function fetchSchedule(silent = false) {
+    if (!silent) setLoading(true);
     try {
       const r = await fetch(`${API_BASE}/schedule`);
       if (!r.ok) return;
@@ -765,7 +763,8 @@ export default function App() {
     } catch (e) {
       console.error('Error fetching schedule:', e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+      markSync();
     }
   }
 
@@ -785,7 +784,7 @@ export default function App() {
       const r = await fetch(`${API_BASE}/active-delays`);
       if (!r.ok) return;
       const data = await r.json();
-      setActiveDelays(Object.values(data));
+      setActiveDelays(normalizeActiveDelays(data));
     } catch (e) {
       console.error('Error fetching active delays:', e);
     }
@@ -823,7 +822,7 @@ export default function App() {
       if (r.ok) {
         const data = await r.json();
         console.log('Test movements created:', data.message);
-        alert(data.message);
+        notify.info('Test movements created', data.message);
       }
     } catch (e) {
       console.error('Error creating test movements:', e);
@@ -838,8 +837,7 @@ export default function App() {
       if (r.ok) {
         const data = await r.json();
         console.log('Conflict forced:', data.message);
-        alert(data.message);
-        fetchConflicts();
+        notify.warning('Conflict forced', data.message);
       }
     } catch (e) {
       console.error('Error forcing conflict:', e);
@@ -888,7 +886,7 @@ export default function App() {
       
       const resp = await r.json();
       if (!r.ok) {
-        alert(`Delay injection failed: ${resp.detail || JSON.stringify(resp)}`);
+        notify.error('Delay injection failed', resp.detail || JSON.stringify(resp));
         return;
       }
       
@@ -899,14 +897,17 @@ export default function App() {
         fetchActiveDelays()
       ]);
       
-      alert(`✅ Delay Injected Successfully!\n\nTrain: ${selectedDelayTrain}\nDelay Type: ${delayType}\nDuration: ${delayMinutes} minutes\nAffected Trains: ${resp.affected_trains.length}\nTotal Impact: +${resp.total_delay_impact.toFixed(1)} minutes`);
+      notify.success(
+        'Delay injected successfully',
+        `Train ${selectedDelayTrain} • ${delayType} • ${delayMinutes} min • Impact +${resp.total_delay_impact.toFixed(1)} min`
+      );
       
       setShowDelayModal(false);
       setSelectedDelayTrain(null);
       setDelayReason("");
       
     } catch (e) {
-      alert("Network error during delay injection");
+      notify.error('Network error during delay injection');
     } finally {
       setLoading(false);
     }
@@ -914,12 +915,14 @@ export default function App() {
 
   async function clearAllDelays() {
     if (activeDelays.length === 0) {
-      alert("No active delays to clear");
+      notify.info('No active delays to clear');
       return;
     }
-    
-    if (!confirm(`Clear all ${activeDelays.length} active delays?`)) return;
-    
+    setShowClearDelaysConfirm(true);
+  }
+
+  async function performClearDelays() {
+    setShowClearDelaysConfirm(false);
     setLoading(true);
     try {
       const r = await fetch(`${API_BASE}/clear-delays`, {
@@ -928,21 +931,20 @@ export default function App() {
       
       const resp = await r.json();
       if (!r.ok) {
-        alert(`Failed to clear delays: ${resp.detail || JSON.stringify(resp)}`);
+        notify.error('Failed to clear delays', resp.detail || JSON.stringify(resp));
         return;
       }
       
-      // Refresh data
       await Promise.all([
         fetchSchedule(),
         fetchLogs(),
         fetchActiveDelays()
       ]);
       
-      alert(`✅ Cleared ${resp.cleared_count} delays successfully!`);
+      notify.success(`Cleared ${resp.cleared_count} delays successfully`);
       
     } catch (e) {
-      alert("Network error clearing delays");
+      notify.error('Network error clearing delays');
     } finally {
       setLoading(false);
     }
@@ -966,33 +968,80 @@ export default function App() {
     }
   }
 
-  // KPI helpers
-  function computeKPIs() {
-    if (!schedule || schedule.length === 0)
-      return { total: 0, ontimePct: 0, avgDelay: 0 };
-    const total = schedule.length;
-    let ontime = 0;
-    let sumDelay = 0;
-    schedule.forEach((s) => {
-      const train = trains.find((t) => t.id === s.train_id);
-      if (!train || !train.scheduled_arrival) return;
-      const scheduledArrival = new Date(train.scheduled_arrival);
-      const actualArrival = new Date(s.actual_arrival);
-      const delay = Math.max(
-        0,
-        (actualArrival.getTime() - scheduledArrival.getTime()) / 60000
-      );
-      sumDelay += delay;
-      if (delay <= 2) ontime += 1; // within 2 minutes considered on-time
-    });
-    return {
-      total,
-      ontimePct: Math.round((ontime / total) * 100),
-      avgDelay: (sumDelay / total).toFixed(1),
-    };
-  }
+  const kpis = useMemo(
+    () => computeScheduleKPIs(schedule, trains),
+    [schedule, trains]
+  );
 
-  const kpis = computeKPIs();
+  const conflictCount = useMemo(() => getConflictCount(conflicts), [conflicts]);
+  const conflictList = useMemo(() => {
+    if (conflicts.conflicts?.length) return conflicts.conflicts;
+    return (conflicts.conflict_log || []).map((log, i) => ({
+      id: `log-${i}`,
+      type: log.type || 'track_conflict',
+      trains_involved: log.trains || [],
+      root_cause: log.track ? `Track ${log.track}` : undefined,
+      severity: 'medium',
+    }));
+  }, [conflicts]);
+
+  const systemHealth = useMemo(() => {
+    if (conflictCount > 0) return 'CONFLICTS' as const;
+    if (activeDelays.length > 0) return 'DELAYS' as const;
+    return 'OPTIMAL' as const;
+  }, [conflictCount, activeDelays.length]);
+
+  useEffect(() => {
+    updateStatus({
+      websocketConnected,
+      lastSync,
+      systemHealth,
+      conflictCount,
+      activeDelayCount: activeDelays.length,
+      trainCount: kpis.total || trains.length,
+      onTimePct: Number(kpis.ontimePct) || 0,
+      isInitialLoadComplete: initialLoadComplete,
+    });
+  }, [
+    websocketConnected,
+    lastSync,
+    systemHealth,
+    conflictCount,
+    activeDelays.length,
+    schedule.length,
+    trains.length,
+    kpis.ontimePct,
+    initialLoadComplete,
+    updateStatus,
+  ]);
+
+  useEffect(() => {
+    registerActions({
+      refreshAll: async () => {
+        setLoading(true);
+        setPreviousSchedule([...scheduleRef.current]);
+        await Promise.all([
+          fetchSchedule(true),
+          fetchLogs(),
+          fetchDataset(),
+          fetchActiveDelays(),
+          fetchConflicts(),
+          fetchTrackStatus(),
+        ]);
+        setAnimTick((prev) => prev + 1);
+        setLoading(false);
+      },
+      resetSystem: async () => {
+        await resetSystem();
+        notify.success('System reset', 'Baseline schedule restored and overrides cleared.');
+      },
+      openAuditLogs: () => {
+        void fetchLogs();
+        setShowLogsModal(true);
+      },
+    });
+    return () => unregisterActions();
+  }, [registerActions, unregisterActions]);
 
   // Derive delay arrays locally if backend doesn't provide them
   function computeDelayArray(entries: ScheduleEntry[]): number[] {
@@ -1022,38 +1071,6 @@ export default function App() {
 
   const displayDelaysBefore = delaysBefore.length > 0 ? delaysBefore : localDelaysBefore;
   const displayDelaysAfter = delaysAfter.length > 0 ? delaysAfter : localDelaysAfter;
-
-  function DelayBars({ title, values }: { title: string; values: number[] }) {
-    const maxVal = Math.max(2, ...values);
-    const bars = values.slice(0, Math.min(values.length, 12));
-    const total = values.reduce((s, v) => s + v, 0);
-    const avg = values.length ? total / values.length : 0;
-    return (
-      <div className="flex-1">
-        <div className="text-sm text-slate-400 mb-1">{title}</div>
-        <div className="h-24 bg-slate-900/40 border border-slate-700 rounded p-2 flex flex-col">
-          <div className="flex items-baseline justify-between mb-1">
-            <div className="text-2xl font-bold text-slate-100">{avg.toFixed(1)}<span className="text-sm font-normal text-slate-400 ml-1">min avg</span></div>
-            <div className="text-xs text-slate-400">Σ {total.toFixed(1)} min</div>
-          </div>
-          <div className="flex-1 flex items-end gap-1">
-            {bars.length === 0 ? (
-              <div className="text-xs text-slate-400 m-auto">0.0 min</div>
-            ) : (
-              bars.map((v, i) => (
-                <div
-                  key={i}
-                  className="flex-1 bg-indigo-400/80 rounded"
-                  style={{ height: `${(v / maxVal) * 100}%` }}
-                  title={`${v.toFixed(1)} min`}
-                />
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // Calculate delay impact for a potential override
   async function calculateDelayImpact(trainId: string, newPlatform: number): Promise<{current: number, predicted: number, difference: number} | null> {
@@ -1185,8 +1202,6 @@ export default function App() {
           }
           
           // Set last action for chatbot auto-explanation
-          setLastOverrideAction(`Override rejected for train ${selectedTrain}: ${resp.reason}`);
-          setAutoExplanationTriggered(false);
         } else {
           setOverrideMsg(resp.detail || JSON.stringify(resp));
         }
@@ -1202,8 +1217,6 @@ export default function App() {
         setOverrideMsg(successMsg);
         
         // Set last action for chatbot auto-explanation
-        setLastOverrideAction(`Override applied for train ${selectedTrain}: ${resp.reason || "re-optimized"}`);
-        setAutoExplanationTriggered(false);
       }
       
       // Force state invalidation and refresh
@@ -1244,47 +1257,6 @@ export default function App() {
     setShowDelayWarning(false);
     setPendingOverride(null);
     setOverrideMsg("Override cancelled due to high delay impact");
-  }
-
-  // Helper function for conflict simulation
-  async function submitOverrideForTrain(trainId: string, stationId: string, platform: number) {
-    setLoading(true);
-    try {
-      const r = await fetch(`${API_BASE}/override`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          train_id: trainId,
-          station_id: stationId,
-          new_platform: platform,
-        }),
-      });
-      const resp = await r.json();
-      
-      if (r.ok) {
-        // Force state invalidation for proper Gantt chart updates
-        setPreviousSchedule([...schedule]); // Store current as previous
-        setSchedule([]); // Clear current to force re-render
-        
-        // Wait for backend processing
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Refresh all data with proper sequencing
-        await Promise.all([
-          fetchSchedule(),
-          fetchLogs()
-        ]);
-        
-        // Force a re-render by updating animation tick
-        setAnimTick(prev => prev + 1);
-      } else {
-        alert(`Override failed: ${resp.detail}`);
-      }
-    } catch (e) {
-      alert("Network error during override");
-    } finally {
-      setLoading(false);
-    }
   }
 
   // Helper function to format log messages with better conflict explanations
@@ -1353,529 +1325,125 @@ export default function App() {
 
   // Removed unused helper functions for cleaner code
 
-  // --- Gantt Chart (responsive, 100% width, shared window) ---
-  function GanttChart({ entries, title, timeWindow }: { entries: ScheduleEntry[]; title: string; timeWindow: { min: number; max: number } }) {
-    const stationMap = useMemo(() => {
-      const map: Record<string, { platforms: number } & { rows: Record<number, ScheduleEntry[]> }> = {};
-      stations.forEach((s) => (map[s.id] = { platforms: s.platforms, rows: {} }));
-      entries.forEach((e) => {
-        if (!map[e.station_id]) return;
-        const p = e.assigned_platform;
-        if (!map[e.station_id].rows[p]) map[e.station_id].rows[p] = [];
-        map[e.station_id].rows[p].push(e);
-      });
-      return map;
-    }, [entries, stations, animTick]); // Add animTick to force re-computation
-
-    const ticks = useMemo(() => {
-      const res: { leftPct: number; label: string; isHour?: boolean }[] = [];
-      const totalSpan = timeWindow.max - timeWindow.min;
-      const span = Math.max(1, totalSpan);
-      
-      // Dynamic tick interval based on time span
-      let tickInterval: number;
-      if (totalSpan <= 2 * 60 * 60 * 1000) { // <= 2 hours: 10 min intervals
-        tickInterval = 10 * 60 * 1000;
-      } else if (totalSpan <= 8 * 60 * 60 * 1000) { // <= 8 hours: 30 min intervals
-        tickInterval = 30 * 60 * 1000;
-      } else { // > 8 hours: 1 hour intervals
-        tickInterval = 60 * 60 * 1000;
-      }
-      
-      const start = Math.floor(timeWindow.min / tickInterval) * tickInterval;
-      const end = Math.ceil(timeWindow.max / tickInterval) * tickInterval;
-      
-      for (let t = start; t <= end; t += tickInterval) {
-        const leftPct = ((t - timeWindow.min) / span) * 100;
-        const date = new Date(t);
-        const isHour = date.getMinutes() === 0;
-        const label = isHour 
-          ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        res.push({ leftPct, label, isHour });
-      }
-      return res;
-    }, [timeWindow.min, timeWindow.max]);
-
-    const span = Math.max(1, timeWindow.max - timeWindow.min);
-
-    return (
-      <div className="bg-slate-800 text-slate-100 rounded shadow p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold">{title}</h2>
-          <div className="text-xs text-gray-500">
-            Time window: {new Date(timeWindow.min).toLocaleString([], { 
-              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" 
-            })} – {new Date(timeWindow.max).toLocaleString([], { 
-              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" 
-            })}
-            <span className="ml-2 text-slate-400">({Math.round((timeWindow.max - timeWindow.min) / (60 * 60 * 1000) * 10) / 10}h span)</span>
-          </div>
-        </div>
-        {/* legend */}
-        <div className="flex flex-wrap gap-3 items-center text-xs text-gray-600 mb-2">
-          <div className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded" style={{backgroundColor: '#3b82f6'}}></span> Express</div>
-          <div className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded" style={{backgroundColor: '#22c55e'}}></span> Local</div>
-          <div className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded" style={{backgroundColor: '#f59e0b'}}></span> Intercity</div>
-          <div className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded" style={{backgroundColor: '#8b5cf6'}}></span> Freight</div>
-          <div className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded" style={{backgroundColor: '#ef4444'}}></span> Delayed</div>
-          <div className="flex items-center gap-1"><span className="text-[10px]">★</span> Overridden</div>
-        </div>
-        <div className="w-full">
-          {/* timeline */}
-          <div className="relative border-b border-slate-700 h-8 w-full">
-            {ticks.map((t, i) => (
-              <div key={i} className="absolute top-0 text-[10px] text-slate-400" style={{ left: `${t.leftPct}%` }}>
-                <div className={`border-l ${t.isHour ? 'h-4 border-slate-400' : 'h-2 border-slate-600'}`}></div>
-                <div className={`translate-x-1 ${t.isHour ? 'font-medium text-slate-300' : 'text-slate-500'}`}>{t.label}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* rows */}
-          <div className="divide-y divide-slate-700">
-            {stations.map((st) => (
-              <div key={st.id} className="py-3">
-                <div className="text-sm font-medium text-slate-200 mb-1">{st.id}</div>
-                {Array.from({ length: st.platforms }).map((_, idx) => {
-                  const p = idx + 1;
-                  const rowEntries = stationMap[st.id]?.rows[p] || [];
-                  return (
-                    <div key={p} className="relative h-10 mb-3 bg-slate-900/40 border border-slate-700 rounded w-full">
-                      <div className="absolute left-2 top-1.5 text-[11px] text-slate-400">P{p}</div>
-                      {rowEntries.map((e, i) => {
-                        const start = new Date(e.actual_arrival).getTime();
-                        const end = new Date(e.actual_departure).getTime();
-                        const leftPct = Math.max(0, ((start - timeWindow.min) / span) * 100);
-                        const widthPct = Math.max(0.5, ((end - start) / span) * 100);
-                        const color = colorForEntry(e);
-                        const t = getTrain(e.train_id);
-                        const heading = `${t?.origin || "-"} → ${t?.destination || "-"}`;
-                        const title = `Train ${e.train_id} • ${heading} @ ${st.id} P${p}\n${new Date(start).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} – ${new Date(end).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
-                        return (
-                          <div
-                            key={i}
-                            className="absolute top-1.5 h-7 rounded text-[10px] text-white flex items-center px-2 shadow"
-                            style={{ left: `${leftPct}%`, width: `${widthPct}%`, backgroundColor: color }}
-                            title={title}
-                          >
-                            <span className="truncate font-medium">{e.train_id}</span>
-                            <span className="ml-2 hidden md:inline text-white/90">{heading}</span>
-                            {isOverridden(e) && <span className="ml-1 text-[9px]">★</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const toggleChatBot = () => {
-    setShowChatBot(prev => !prev);
-    // If opening chatbot and there was a recent override/conflict, trigger auto explanation
-    if (!showChatBot && lastOverrideAction && !autoExplanationTriggered) {
-      setAutoExplanationTriggered(true);
-    }
-  };
-
-  const renderChatBotToggle = () => (
-    <button 
-      onClick={toggleChatBot}
-      className="fixed bottom-6 right-6 bg-blue-600 text-white p-3 rounded-full shadow-lg hover:bg-blue-700 transition-colors z-50 flex items-center justify-center"
-      aria-label="Chat with AI Assistant"
-    >
-      <Bot className="w-6 h-6" />
-    </button>
-  );
-
-  const renderChatBot = () => (
-    showChatBot && (
-      <ChatBot 
-        logsBefore={previousSchedule.map((entry) => ({
-          timestamp: new Date().toISOString(),
-          action: "baseline_schedule",
-          details: `${entry.train_id} → ${entry.station_id} P${entry.assigned_platform}`
-        }))}
-        logsAfter={logs}
-        scheduleData={{
-          schedule: schedule,
-          delays_before_min: displayDelaysBefore,
-          delays_after_min: displayDelaysAfter,
-          reasons: schedule.map(s => s.reason || "")
-        }}
-        lastAction={lastOverrideAction}
-        autoExplain={autoExplanationTriggered}
-        onClose={() => {
-          setShowChatBot(false);
-          setAutoExplanationTriggered(false);
-        }}
-        onAutoExplanationComplete={() => setAutoExplanationTriggered(false)}
-      />
-    )
-  );
-
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        <header className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-3">
-            <img src="/train-logo.png" alt="TrainVision AI" className="w-10 h-10" />
-            <h1 className="text-2xl font-semibold">TrainVision AI Decision Support</h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => {
-                fetchLogs();
-                setShowLogsModal(true);
-              }}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-            >
-              📋 Audit Logs
-            </button>
-            <button 
-              onClick={async () => {
-                setLoading(true);
-                // Force state invalidation
-                setPreviousSchedule([...schedule]);
-                setSchedule([]);
-                
-                await Promise.all([
-                  fetchSchedule(),
-                  fetchLogs()
-                ]);
-                
-                // Force re-render
-                setAnimTick(prev => prev + 1);
-              }}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-              disabled={loading}
-            >
-              {loading ? '⏳ Refreshing...' : '🔄 Refresh'}
-            </button>
-            <button 
-              onClick={async () => {
-                if (confirm('This will reset all overrides and regenerate the baseline schedule. Continue?')) {
-                  await resetSystem();
-                }
-              }}
-              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-            >
-              🔄 Reset System
-            </button>
-            <div className="text-right">
-              <div className="text-sm text-slate-400">Local time</div>
-              <div className="font-medium">{nowClock.toLocaleTimeString()}</div>
-            </div>
-          </div>
-        </header>
-
-        {/* Full-width Visualization on top */}
+    <div className="bg-surface-1 text-slate-100">
+      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
         <section className="mb-6">
-          <div className="bg-slate-800 rounded shadow p-4 relative overflow-hidden" style={{ minHeight: 360 }}>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold">Network Map — Prototype</h2>
-              <div className="flex items-center gap-2">
-                <button onClick={() => { fetchStations(); fetchDataset(); fetchSchedule(); }} className="px-3 py-2 bg-emerald-600 text-white rounded">Refresh All</button>
+          <div className="relative overflow-hidden rounded-xl border border-slate-700 bg-surface-2 p-4 shadow-lg lg:p-5" style={{ minHeight: 340 }}>
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-white">Network Map</h2>
+                <p className="text-sm text-slate-400">Hyderabad corridor · HYB, SC, KCG</p>
+              </div>
+              <div className="text-right text-sm text-slate-400">
+                <div>Local time</div>
+                <div className="font-medium text-slate-200">{nowClock.toLocaleTimeString()}</div>
               </div>
             </div>
-            {/* Map + dataset table */}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2">
-                <GeoMap stations={stations} schedule={schedule} getTrain={getTrain} tick={animTick} />
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                {!initialLoadComplete ? (
+                  <MapSkeleton />
+                ) : (
+                  <GeoMap stations={stations} schedule={schedule} getTrain={getTrain} tick={animTick} />
+                )}
               </div>
-              <div className="col-span-1">
-                <DatasetTable />
+              <div className="lg:col-span-1">
+                {!initialLoadComplete ? <TableSkeleton rows={6} /> : <DatasetTable />}
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between">
-              <div className="text-xs text-slate-300">Prototype map positions are pseudo-random; trains are shown near their assigned station.</div>
+              <div className="text-xs text-slate-400">Live train positions near assigned stations across the network.</div>
               <Legend />
             </div>
-            {/* conflict banner removed */}
           </div>
         </section>
 
-        {/* Hero section with before/after optimization graphs and System Alerts */}
-        <section className="grid grid-cols-3 gap-4 mb-6">
-          <div className="col-span-2 bg-slate-800 rounded shadow p-4">
-            {/* KPI Section - Compact */}
-            <div className="flex gap-6 mb-4">
-              <DelayBars title="Before optimization (delay min)" values={displayDelaysBefore} />
-              <DelayBars title="After optimization (delay min)" values={displayDelaysAfter} />
-              <div className="flex-1">
-                <div className="text-sm text-slate-400">Total trains</div>
-                <div className="text-2xl font-bold text-slate-100">{kpis.total}</div>
-              </div>
-              <div className="flex-1">
-                <div className="text-sm text-slate-400">On-time % (&lt;=2m)</div>
-                <div className="text-2xl font-bold text-slate-100">{kpis.ontimePct}%</div>
-              </div>
-              <div className="flex-1">
-                <div className="text-sm text-slate-400">Avg delay (min)</div>
-                <div className="text-2xl font-bold text-slate-100">{kpis.avgDelay}</div>
-              </div>
-            </div>
-
-            {/* System Alerts & Active Delays - Vertical Layout */}
-            <div className="mt-4">
-              <h3 className="font-semibold mb-3 text-white">System Alerts & Active Delays</h3>
-              <div className="space-y-3">
-                {/* Active Conflicts */}
-                <div className="bg-slate-700 rounded p-3">
-                  <h4 className="font-medium text-red-400 mb-2 flex items-center gap-2 text-sm">
-                    <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                    Active Conflicts ({Object.keys(conflicts).length})
-                  </h4>
-                  <div className="space-y-1 max-h-24 overflow-y-auto">
-                    {Object.keys(conflicts).length === 0 ? (
-                      <div className="text-xs text-slate-400">No active conflicts</div>
-                    ) : (
-                      Object.entries(conflicts).map(([key, conflict]: [string, any]) => (
-                        <div key={key} className="text-xs bg-slate-600 rounded p-1.5">
-                          <div className="text-red-300 font-medium">Platform Conflict</div>
-                          <div className="text-slate-300">
-                            {conflict.trains?.join(', ') || 'Multiple trains'} - Track {key}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Active Delays */}
-                <div className="bg-slate-700 rounded p-3">
-                  <h4 className="font-medium text-yellow-400 mb-2 flex items-center gap-2 text-sm">
-                    <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
-                    Active Delays ({activeDelays.length})
-                  </h4>
-                  <div className="space-y-1 max-h-24 overflow-y-auto">
-                    {activeDelays.length === 0 ? (
-                      <div className="text-xs text-slate-400">No active delays</div>
-                    ) : (
-                      activeDelays.map((delay, idx) => (
-                        <div key={idx} className="text-xs bg-slate-600 rounded p-1.5">
-                          <div className="text-yellow-300 font-medium">
-                            {delay.type?.charAt(0).toUpperCase() + delay.type?.slice(1) || 'Delay'}
-                          </div>
-                          <div className="text-slate-300">
-                            Train {delay.train_id} - {delay.minutes}min delay
-                          </div>
-                          {delay.reason && (
-                            <div className="text-slate-400 text-xs mt-0.5">{delay.reason}</div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Quick Actions Impact Display - Always Visible */}
-                <div className="p-3 bg-slate-700 rounded">
-                  <h4 className="font-medium text-blue-400 mb-2 text-sm">Quick Actions Impact</h4>
-                  <div className="grid grid-cols-3 gap-3 text-xs">
-                    <div className="text-center">
-                      <div className="text-slate-400">Affected Trains</div>
-                      <div className="text-lg font-bold text-white">
-                        {new Set([
-                          ...Object.values(conflicts).flatMap((c: any) => c.trains || []),
-                          ...activeDelays.map(d => d.train_id)
-                        ]).size}
-                      </div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-slate-400">Total Delay Impact</div>
-                      <div className="text-lg font-bold text-yellow-400">
-                        {activeDelays.reduce((sum, d) => sum + (d.minutes || 0), 0)}min
-                      </div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-slate-400">System Status</div>
-                      <div className={`text-lg font-bold ${
-                        Object.keys(conflicts).length === 0 && activeDelays.length === 0 
-                          ? 'text-green-400' 
-                          : Object.keys(conflicts).length > 0 
-                            ? 'text-red-400' 
-                            : 'text-yellow-400'
-                      }`}>
-                        {Object.keys(conflicts).length === 0 && activeDelays.length === 0 
-                          ? 'OPTIMAL' 
-                          : Object.keys(conflicts).length > 0 
-                            ? 'CONFLICTS' 
-                            : 'DELAYS'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-slate-800 rounded shadow p-4 col-span-1 border border-slate-700">
-            <div className="font-medium mb-2">Quick actions</div>
-            <button
-              onClick={() => {
-                setShowModal(true);
-                setSelectedTrain(schedule[0]?.train_id || null);
-              }}
-              className="w-full mb-2 px-3 py-2 border border-slate-600 rounded bg-slate-900/40 hover:bg-slate-900/60"
-            >
-              Manual Override
-            </button>
-            <button
-              onClick={async () => {
-                setLoading(true);
-                try {
-                  const response = await fetch(`${API_BASE}/inject-conflict`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" }
-                  });
-                  
-                  if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                  }
-                  
-                  const result = await response.json();
-                  
-                  if (result.status === "conflict_injected") {
-                    alert(`✅ Conflict Injected Successfully!\n\nTrains: ${result.applied_change.train_id}\nStation: ${result.applied_change.station_id}\nPlatform: ${result.applied_change.new_platform}\nDelay increase: +${result.optimization_result.delay_increase.toFixed(1)} minutes\nAffected trains: ${result.optimization_result.affected_trains}`);
-                    
-                    // Set last action for chatbot auto-explanation
-                    setLastOverrideAction(`Conflict injected: ${result.applied_change.train_id} moved to Platform ${result.applied_change.new_platform}`);
-                    setAutoExplanationTriggered(false);
-                  } else if (result.status === "conflict_rejected") {
-                    alert(`❌ Conflict Injection Rejected\n\nReason: ${result.reason}\n\nThe optimization system prevented this conflict because it would cause excessive delays.`);
-                    
-                    // Set last action for chatbot auto-explanation
-                    setLastOverrideAction(`Conflict injection rejected: ${result.reason}`);
-                    setAutoExplanationTriggered(false);
-                  } else {
-                    alert(`ℹ️ ${result.message || 'Unknown response'}`);
-                  }
-                  
-                  // Refresh data
-                  await Promise.all([
-                    fetchSchedule(),
-                    fetchLogs()
-                  ]);
-                } catch (error) {
-                  console.error('Conflict injection error:', error);
-                  alert(`Error injecting conflict: ${error instanceof Error ? error.message : 'Unknown error'}`);
-                } finally {
-                  setLoading(false);
-                }
-              }}
-              className="w-full mb-2 px-3 py-2 border border-amber-600 rounded bg-amber-900/40 hover:bg-amber-900/60 text-amber-200"
-              disabled={loading}
-            >
-               Test Conflict Injection
-            </button>
-            <button
-              onClick={() => {
-                setShowDelayModal(true);
-                setSelectedDelayTrain(schedule[0]?.train_id || null);
-              }}
-              className="w-full mb-2 px-3 py-2 border border-red-600 rounded bg-red-900/40 hover:bg-red-900/60 text-red-200"
-            >
-               Inject Delay
-            </button>
-            <button
-              onClick={clearAllDelays}
-              className="w-full mb-2 px-3 py-2 border border-orange-600 rounded bg-orange-900/40 hover:bg-orange-900/60 text-orange-200"
-              disabled={activeDelays.length === 0}
-            >
-               Clear Delays ({activeDelays.length})
-            </button>
-            <button
-              onClick={startMovementSimulation}
-              className="w-full mb-2 px-3 py-2 border border-green-600 rounded bg-green-900/40 hover:bg-green-900/60 text-green-200"
-            >
-               Start Train Movement
-            </button>
-            <button
-              onClick={createTestMovements}
-              className="w-full mb-2 px-3 py-2 border border-blue-600 rounded bg-blue-900/40 hover:bg-blue-900/60 text-blue-200"
-            >
-               Create Test Movements
-            </button>
-            <button
-              onClick={forceConflict}
-              className="w-full mb-2 px-3 py-2 border border-red-600 rounded bg-red-900/40 hover:bg-red-900/60 text-red-200"
-            >
-               Force Conflict
-            </button>
-            <div className={`w-full mb-2 px-3 py-2 rounded text-center text-sm ${
-              websocketConnected ? 'bg-green-900/40 text-green-200' : 'bg-red-900/40 text-red-200'
-            }`}>
-              {websocketConnected ? '🟢 Live Updates' : '🔴 Disconnected'}
-            </div>
-            <div className="w-full mb-2 px-3 py-2 rounded text-center text-sm bg-blue-900/40 text-blue-200">
-              Trains: {trainPositions.length}
-            </div>
-            <div className={`w-full mb-2 px-3 py-2 rounded text-center text-sm ${
-              conflicts.active_conflicts > 0 ? 'bg-red-900/40 text-red-200' : 'bg-green-900/40 text-green-200'
-            }`}>
-              {conflicts.active_conflicts > 0 ? `🚨 ${conflicts.active_conflicts} Conflicts` : '✅ No Conflicts'}
-            </div>
-            <div className="w-full mb-2 px-3 py-2 rounded text-center text-sm bg-purple-900/40 text-purple-200">
-              Tracks: {Object.keys(trackStatus.track_occupancy || {}).length}
-            </div>
-            <button
-              onClick={() => {
-                fetchLogs();
-              }}
-              className="w-full px-3 py-2 border border-slate-600 rounded bg-slate-900/40 hover:bg-slate-900/60"
-            >
-              Refresh Logs
-            </button>
-          </div>
-        </section>
-
-        <section className="grid grid-cols-1 gap-4">
-          {/* Left: Schedule table */}
-          <div className="col-span-1 bg-slate-800 rounded shadow p-4 border border-slate-700">
-            <h2 className="font-semibold mb-3">Schedule</h2>
-            {loading ? (
-              <div className="text-slate-300">Loading...</div>
+        <section className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <div className="rounded-xl border border-slate-700 bg-surface-2 p-4 shadow-lg xl:col-span-2">
+            {!initialLoadComplete ? (
+              <KpiSkeleton />
             ) : (
-              <div className="overflow-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-slate-400">
-                    <tr className="border-b border-slate-700">
-                      <th className="text-left py-2 pr-2">Train</th>
-                      <th className="text-left py-2 pr-2">Type</th>
-                      <th className="text-left py-2 pr-2">Station</th>
-                      <th className="text-left py-2 pr-2">Platform</th>
-                      <th className="text-left py-2 pr-2">Arr</th>
-                      <th className="text-left py-2 pr-2">Dep</th>
-                      <th className="text-left py-2 pr-2">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {schedule.map((s) => {
-                      const t = trains.find((tr) => tr.id === s.train_id);
-                      return (
-                        <tr key={s.train_id} className="border-b border-slate-800">
-                          <td className="py-2 pr-2 font-medium text-slate-100">{s.train_id}</td>
-                          <td className="py-2 pr-2 text-slate-300">{t?.type || "-"}</td>
-                          <td className="py-2 pr-2 text-slate-300">{s.station_id}</td>
-                          <td className="py-2 pr-2 text-slate-300">P{s.assigned_platform}</td>
-                          <td className="py-2 pr-2 text-slate-300">{new Date(s.actual_arrival).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                          <td className="py-2 pr-2 text-slate-300">{new Date(s.actual_departure).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                          <td className="py-2 pr-2">
-                            <button onClick={() => openOverride(s.train_id)} className="px-2 py-1 text-xs bg-amber-500 text-white rounded">Override</button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <KpiStrip
+                delaysBefore={displayDelaysBefore}
+                delaysAfter={displayDelaysAfter}
+                total={kpis.total}
+                onTimePct={kpis.ontimePct}
+                avgDelay={String(kpis.avgDelay)}
+              />
+            )}
+
+            {!initialLoadComplete ? null : (
+              <AlertsPanel
+                conflictCount={conflictCount}
+                conflicts={conflictList}
+                activeDelays={activeDelays}
+              />
+            )}
+          </div>
+
+          <QuickActionsPanel
+            loading={loading && !initialLoadComplete}
+            websocketConnected={websocketConnected}
+            trainCount={kpis.total || trains.length}
+            conflictCount={conflictCount}
+            activeDelayCount={activeDelays.length}
+            trackCount={Object.keys(trackStatus.track_occupancy || {}).length}
+            onManualOverride={() => {
+              const trainId = schedule[0]?.train_id;
+              if (trainId) void openOverride(trainId);
+            }}
+            onInjectConflict={async () => {
+              setLoading(true);
+              try {
+                const response = await fetch(`${API_BASE}/inject-conflict`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" }
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                const result = await response.json();
+                if (result.status === "conflict_injected") {
+                  notify.success(
+                    'Conflict injected successfully',
+                    `Train ${result.applied_change.train_id} → Platform ${result.applied_change.new_platform} • +${result.optimization_result.delay_increase.toFixed(1)} min delay`
+                  );
+                } else if (result.status === "conflict_rejected") {
+                  notify.warning('Conflict injection rejected', result.reason);
+                } else {
+                  notify.info(result.message || 'Unknown response');
+                }
+                await Promise.all([fetchSchedule(), fetchLogs()]);
+              } catch (error) {
+                console.error('Conflict injection error:', error);
+                notify.error('Error injecting conflict', error instanceof Error ? error.message : 'Unknown error');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            onInjectDelay={() => {
+              setShowDelayModal(true);
+              setSelectedDelayTrain(schedule[0]?.train_id || null);
+            }}
+            onClearDelays={clearAllDelays}
+            onStartMovement={startMovementSimulation}
+            onCreateTestMovements={createTestMovements}
+            onForceConflict={forceConflict}
+            onRefreshLogs={() => { void fetchLogs(); }}
+          />
+        </section>
+
+        <section className="mb-6">
+          <div className="rounded-xl border border-slate-700 bg-surface-2 p-4 shadow-lg">
+            <h2 className="mb-3 text-lg font-semibold">Schedule</h2>
+            {!initialLoadComplete ? (
+              <TableSkeleton rows={8} />
+            ) : (
+              <ScheduleTable
+                schedule={schedule}
+                trains={trains}
+                loading={false}
+                onOverride={openOverride}
+              />
             )}
           </div>
         </section>
@@ -1896,43 +1464,7 @@ export default function App() {
                 reason: "initial schedule",
               }));
 
-          // Inject a synthetic pre-optimization conflict for T104 vs T106 on HYB P1
-          // without affecting the actual optimized (after) schedule visualization.
-          const beforeEntries: ScheduleEntry[] = (() => {
-            const byId: Record<string, ScheduleEntry> = {};
-            baseBefore.forEach(e => { byId[e.train_id] = { ...e }; });
-
-            // Ensure T104 exists in before; if present, force HYB P1 window 09:05–09:30
-            const t104Train = trains.find(t => t.id === 'T104');
-            if (t104Train) {
-              byId['T104'] = {
-                train_id: 'T104',
-                station_id: t104Train.origin || 'HYB',
-                assigned_platform: 1,
-                actual_arrival: t104Train.scheduled_arrival || '2025-09-22T09:05:00',
-                actual_departure: t104Train.scheduled_departure || '2025-09-22T09:30:00',
-                reason: 'pre-optimization conflict baseline',
-              };
-            }
-
-            // Add or override T106 (existing in dataset) to overlap on HYB P1 09:12–09:22
-            const t106Train = trains.find(t => t.id === 'T106');
-            if (t106Train) {
-              byId['T106'] = {
-                train_id: 'T106',
-                station_id: t106Train.origin || 'HYB',
-                assigned_platform: 1,
-                actual_arrival: t106Train.scheduled_arrival || '2025-09-22T09:12:00',
-                actual_departure: t106Train.scheduled_departure || '2025-09-22T09:22:00',
-                reason: 'pre-optimization conflict baseline',
-              };
-            }
-
-            // Return base entries but with T104/T107 forced as above; others unchanged
-            const merged = Object.values(byId);
-            return merged;
-          })();
-
+          const beforeEntries = baseBefore;
           const afterEntries = schedule.length > 0 ? schedule : baseBefore;
 
           // Enhanced dynamic time window calculation
@@ -1978,12 +1510,12 @@ export default function App() {
           });
 
           return (
-            <section className="mt-6 space-y-4">
-              <div className="bg-slate-800 rounded shadow p-4">
-                <h3 className="font-semibold mb-3">📊 Schedule Comparison</h3>
-                <div className="mb-3 p-2 bg-blue-900/20 border border-blue-500 rounded text-sm">
-                  <span className="text-blue-400">ℹ️ Dynamic Time Window:</span> The timeline automatically adjusts to show all trains, regardless of their arrival times (8:50 AM, 1:00 PM, etc.)
-                </div>
+            <section className="mb-6 space-y-4">
+              <div className="rounded-xl border border-slate-700 bg-surface-2 p-4 shadow-lg">
+                <h3 className="mb-1 text-lg font-semibold text-white">Schedule Comparison</h3>
+                <p className="mb-4 text-sm text-slate-400">
+                  Baseline vs optimized timeline. Window adjusts automatically to fit all trains.
+                </p>
                 <div className="grid grid-cols-3 gap-4 mb-4 text-sm">
                   <div className="bg-slate-700/50 rounded p-3">
                     <div className="text-slate-400">Total Changes</div>
@@ -1998,19 +1530,27 @@ export default function App() {
                     <div className="text-2xl font-bold">{afterEntries.length}</div>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div>
-                    <GanttChart 
-                      entries={beforeEntries} 
-                      title="Before Optimization (Baseline/Previous Schedule)" 
-                      timeWindow={sharedWindow} 
+                    <GanttChart
+                      entries={beforeEntries}
+                      title="Before Optimization (Baseline/Previous Schedule)"
+                      timeWindow={sharedWindow}
+                      stations={stations}
+                      trains={trains}
+                      animTick={animTick}
+                      onEntryClick={setGanttSelectedEntry}
                     />
                   </div>
                   <div>
-                    <GanttChart 
-                      entries={afterEntries} 
-                      title="After Optimization (Current Schedule)" 
-                      timeWindow={sharedWindow} 
+                    <GanttChart
+                      entries={afterEntries}
+                      title="After Optimization (Current Schedule)"
+                      timeWindow={sharedWindow}
+                      stations={stations}
+                      trains={trains}
+                      animTick={animTick}
+                      onEntryClick={setGanttSelectedEntry}
                     />
                   </div>
                 </div>
@@ -2027,116 +1567,17 @@ export default function App() {
           );
         })()}
 
-        {/* Conflict Simulation Panel */}
-        <section className="mb-6">
-          <div className="bg-slate-800 rounded shadow p-4">
-            <h3 className="font-semibold mb-4">🚨 Conflict Simulation & Override Testing</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-700 rounded p-3">
-                <h4 className="font-medium mb-2">Create Platform Conflict</h4>
-                <p className="text-sm text-slate-300 mb-3">
-                  Force two trains to want the same platform at overlapping times to test the optimizer's conflict resolution.
-                </p>
-                <div className="space-y-2">
-                  <div>
-                    <label className="block text-xs text-slate-400">Train 1</label>
-                    <select 
-                      className="w-full border border-slate-600 rounded px-2 py-1 bg-slate-900 text-slate-100 text-sm"
-                      onChange={(e) => {
-                        const train = trains.find(t => t.id === e.target.value);
-                        if (train) {
-                          // Force this train to platform 1 to create conflict
-                          submitOverrideForTrain(train.id, train.origin || 'HYB', 1);
-                        }
-                      }}
-                    >
-                      <option value="">Select train to force to Platform 1</option>
-                      {trains.map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.id} ({t.type}) - {t.origin}→{t.destination}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400">Train 2</label>
-                    <select 
-                      className="w-full border border-slate-600 rounded px-2 py-1 bg-slate-900 text-slate-100 text-sm"
-                      onChange={(e) => {
-                        const train = trains.find(t => t.id === e.target.value);
-                        if (train) {
-                          // Force this train to platform 1 too to create conflict
-                          submitOverrideForTrain(train.id, train.origin || 'HYB', 1);
-                        }
-                      }}
-                    >
-                      <option value="">Select another train to force to Platform 1</option>
-                      {trains.map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.id} ({t.type}) - {t.origin}→{t.destination}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-slate-700 rounded p-3">
-                <h4 className="font-medium mb-2">Manual Override Test</h4>
-                <p className="text-sm text-slate-300 mb-3">
-                  Test the feasibility checker by trying to move a train to an occupied platform.
-                </p>
-                <div className="space-y-2">
-                  <div>
-                    <label className="block text-xs text-slate-400">Train to Override</label>
-                    <select 
-                      value={selectedTrain || ''}
-                      onChange={(e) => setSelectedTrain(e.target.value)}
-                      className="w-full border border-slate-600 rounded px-2 py-1 bg-slate-900 text-slate-100 text-sm"
-                    >
-                      <option value="">Select train</option>
-                      {trains.map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.id} ({t.type}) - {t.origin}→{t.destination}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400">Target Platform</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="4"
-                      value={overridePlatform}
-                      onChange={(e) => setOverridePlatform(Number(e.target.value))}
-                      className="w-full border border-slate-600 rounded px-2 py-1 bg-slate-900 text-slate-100 text-sm"
-                    />
-                  </div>
-                  <button
-                    onClick={() => selectedTrain && submitOverrideForTrain(selectedTrain, trains.find(t => t.id === selectedTrain)?.origin || 'HYB', overridePlatform)}
-                    disabled={!selectedTrain}
-                    className="w-full px-3 py-2 bg-amber-600 text-white rounded text-sm disabled:bg-slate-600 disabled:text-slate-400"
-                  >
-                    Test Override
-                  </button>
-                </div>
-              </div>
-            </div>
-            
-            <div className="mt-4 p-3 bg-slate-900 rounded">
-              <h5 className="font-medium text-sm mb-2">💡 How to Test Conflicts:</h5>
-              <ul className="text-xs text-slate-300 space-y-1">
-                <li>1. Select two trains with overlapping times (like T101 and T104 both starting around 09:00)</li>
-                <li>2. Force both to Platform 1 using the dropdowns above</li>
-                <li>3. Watch the optimizer resolve the conflict by delaying one train or assigning different platforms</li>
-                <li>4. Try manual overrides to see feasibility checking in action</li>
-                <li>5. Check the logs to see conflict resolution reasoning</li>
-              </ul>
-            </div>
-          </div>
-        </section>
       </div>
+
+      <TrainDetailDrawer
+        entry={ganttSelectedEntry}
+        train={ganttSelectedEntry ? getTrain(ganttSelectedEntry.train_id) ?? null : null}
+        onClose={() => setGanttSelectedEntry(null)}
+        onOverride={(trainId) => {
+          setGanttSelectedEntry(null);
+          void openOverride(trainId);
+        }}
+      />
 
       {/* Override modal */}
       {showModal && (
@@ -2347,7 +1788,7 @@ export default function App() {
             <div className="mt-6 pt-4 border-t border-slate-600">
               <div className="flex justify-between items-center">
                 <div className="text-sm text-slate-400">
-                  Total logs: {logs.length} | Last updated: {logs.length > 0 ? new Date(logs[logs.length - 1].timestamp).toLocaleString() : 'Never'}
+                  Total logs: {logs.length} | Last updated: {logs.length > 0 ? new Date(logs[0].timestamp).toLocaleString() : 'Never'}
                 </div>
                 <button
                   onClick={() => {
@@ -2451,9 +1892,15 @@ export default function App() {
         </div>
       )}
 
-      {/* Chat Bot Components */}
-      {renderChatBotToggle()}
-      {renderChatBot()}
+      <ConfirmDialog
+        open={showClearDelaysConfirm}
+        title="Clear all active delays?"
+        message={`This will clear ${activeDelays.length} active delay${activeDelays.length === 1 ? '' : 's'} from the system.`}
+        confirmLabel="Clear delays"
+        variant="warning"
+        onConfirm={() => void performClearDelays()}
+        onCancel={() => setShowClearDelaysConfirm(false)}
+      />
     </div>
   );
 }

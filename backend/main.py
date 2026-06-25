@@ -25,8 +25,11 @@ from fastapi.middleware.cors import CORSMiddleware
 # Configure CORS for production
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 ALLOWED_ORIGINS = [
-    "http://localhost:5173",  # Development
-    "http://localhost:3000",  # Alternative dev port
+    "http://localhost:5173",  # Vite default
+    "http://localhost:5174",  # Vite fallback when 5173 is taken
+    "http://localhost:3000",  # Docker / alternative dev port
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
     "https://trainvision.vercel.app",  # Your live frontend URL
     "https://trainvision-ai.vercel.app",  # Alternative URL
     FRONTEND_URL,  # Production frontend URL
@@ -35,6 +38,7 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
@@ -1026,11 +1030,23 @@ def force_conflict():
 
 @app.get("/conflicts")
 def get_conflicts():
-    """Get current conflicts and conflict log"""
+    """Get current conflicts, detailed schedule conflicts, and conflict log"""
+    track_conflicts = detect_track_conflicts()
+    detailed_conflicts = []
+    impact: Dict = {}
+    if schedule:
+        conflicts_list, impact = detect_conflicts(trains, stations, schedule)
+        detailed_conflicts = [conflict.dict() for conflict in conflicts_list]
+
     return {
-        "active_conflicts": len(detect_track_conflicts()),
-        "conflict_log": conflict_log[-10:],  # Last 10 conflicts
-        "track_occupancy": track_occupancy
+        "active_conflicts": len(track_conflicts),
+        "total_count": len(detailed_conflicts),
+        "conflicts": detailed_conflicts,
+        "conflict_log": conflict_log[-10:],
+        "track_occupancy": track_occupancy,
+        "impact": impact,
+        "by_severity": impact.get("by_severity", {}),
+        "by_type": impact.get("by_type", {}),
     }
 
 @app.get("/track-status")
@@ -1173,25 +1189,6 @@ def check_feasibility(req: FeasibilityRequest):
         reasons=reasons
     )
 
-@app.get("/conflicts")
-def get_current_conflicts():
-    """Get current conflicts with detailed explanations"""
-    global current_conflicts, schedule
-    
-    if not schedule:
-        return {"conflicts": [], "impact": {}}
-    
-    # Refresh conflicts
-    conflicts, impact = detect_conflicts(trains, stations, schedule)
-    
-    return {
-        "conflicts": [conflict.dict() for conflict in conflicts],
-        "impact": impact,
-        "total_count": len(conflicts),
-        "by_severity": impact.get("by_severity", {}),
-        "by_type": impact.get("by_type", {})
-    }
-
 @app.get("/recommendations", response_model=List[Recommendation])
 def get_recommendations(max_recommendations: int = 10):
     """
@@ -1213,23 +1210,48 @@ def get_recommendations(max_recommendations: int = 10):
     
     return recommendations
 
+def _resolve_recommendation(recommendation_id: str) -> Optional[Recommendation]:
+    """Find recommendation by ID, regenerating if the in-memory cache was refreshed."""
+    global current_recommendations, schedule, current_conflicts
+
+    found = next((r for r in current_recommendations if r.id == recommendation_id), None)
+    if found:
+        return found
+
+    if not schedule:
+        return None
+
+    conflicts, _ = detect_conflicts(trains, stations, schedule)
+    current_conflicts = conflicts
+    refreshed = generate_recommendations(trains, stations, schedule, conflicts)
+    current_recommendations = refreshed
+    return next((r for r in refreshed if r.id == recommendation_id), None)
+
+
+def _reoptimize_schedule_after_recommendation() -> None:
+    global schedule, active_delays, fixed_overrides, current_conflicts
+    if active_delays:
+        schedule = greedy_optimizer_with_delays(trains, stations, fixed_overrides, active_delays)
+    else:
+        schedule = greedy_optimizer(trains, stations, fixed_overrides)
+    current_conflicts, _ = detect_conflicts(trains, stations, schedule)
+
+
 @app.post("/apply-recommendation")
 def apply_recommendation(recommendation_id: str):
     """Apply a specific recommendation"""
-    global current_recommendations, fixed_overrides, active_delays
-    
-    # Find the recommendation
-    recommendation = next((r for r in current_recommendations if r.id == recommendation_id), None)
+    global fixed_overrides, active_delays
+
+    recommendation = _resolve_recommendation(recommendation_id)
     if not recommendation:
         raise HTTPException(status_code=404, detail="Recommendation not found")
-    
+
     try:
-        if recommendation.action_type == "change_platform":
-            # Apply platform change as override
-            fixed_overrides[recommendation.train_id] = recommendation.new_platform
-            
-        elif recommendation.action_type == "delay_train":
-            # Apply delay
+        if recommendation.action_type in ("change_platform", "move_train"):
+            if recommendation.new_platform is not None:
+                fixed_overrides[recommendation.train_id] = recommendation.new_platform
+
+        elif recommendation.action_type in ("delay_train", "swap_priority"):
             if recommendation.delay_minutes:
                 if recommendation.train_id not in active_delays:
                     active_delays[recommendation.train_id] = {}
@@ -1239,25 +1261,28 @@ def apply_recommendation(recommendation_id: str):
                     "reason": f"Applied recommendation: {recommendation.description}",
                     "timestamp": datetime.now()
                 })
-        
-        elif recommendation.action_type == "move_train":
-            # Apply platform move
-            if recommendation.new_platform:
-                fixed_overrides[recommendation.train_id] = recommendation.new_platform
-        
-        # Log the action
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported recommendation action: {recommendation.action_type}",
+            )
+
+        _reoptimize_schedule_after_recommendation()
+
         logs.append(LogEntry(
             timestamp=datetime.now(),
             action="recommendation_applied",
             details=f"Applied recommendation: {recommendation.description}"
         ))
-        
+
         return {
             "status": "success",
             "message": f"Applied recommendation: {recommendation.description}",
             "recommendation_id": recommendation_id
         }
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error applying recommendation {recommendation_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to apply recommendation: {str(e)}")

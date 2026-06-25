@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, RotateCcw, AlertTriangle, TrendingUp, Clock, Train, Zap } from 'lucide-react';
+import { Play, AlertTriangle, TrendingUp, Clock, Train, Zap } from 'lucide-react';
+import { ConflictTestingPanel } from './ConflictTestingPanel';
+import { notify } from '../lib/notify';
 
 interface SimulationScenario {
   scenario_id: string;
@@ -77,7 +79,7 @@ const SimulationDashboard: React.FC = () => {
 
   const runSimulation = async () => {
     if (!selectedTrain && scenarioType !== 'weather') {
-      alert('Please select a train for this scenario type');
+      notify.warning('Please select a train for this scenario type');
       return;
     }
 
@@ -151,11 +153,11 @@ const SimulationDashboard: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white p-6">
+    <div className="min-h-screen bg-surface-1 p-6 text-white">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">🎯 Scenario Simulation Dashboard</h1>
+          <h1 className="mb-2 text-3xl font-bold">Scenario Simulation</h1>
           <p className="text-slate-400">Test what-if scenarios and analyze their impact on train operations</p>
         </div>
 
@@ -495,6 +497,14 @@ const SimulationDashboard: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="mt-8">
+          <ConflictTestingPanel
+            trains={trains}
+            apiBase={API_BASE}
+            onDataRefresh={fetchInitialData}
+          />
         </div>
       </div>
     </div>

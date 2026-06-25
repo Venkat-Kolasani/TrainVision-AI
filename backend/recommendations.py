@@ -10,6 +10,28 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+RECOMMENDATION_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+
+
+def stable_recommendation_id(
+    action_type: str,
+    description: str,
+    train_id: str,
+    station_id: Optional[str] = None,
+    new_platform: Optional[int] = None,
+    delay_minutes: Optional[int] = None,
+) -> str:
+    """Deterministic ID so recommendations stay addressable across GET polls."""
+    key = "|".join([
+        action_type,
+        train_id,
+        station_id or "",
+        str(new_platform if new_platform is not None else ""),
+        str(delay_minutes if delay_minutes is not None else ""),
+        description,
+    ])
+    return str(uuid.uuid5(RECOMMENDATION_NAMESPACE, key))
+
 class RecommendationsEngine:
     def __init__(self, trains: List[Train], stations: Dict[str, Station]):
         self.trains = trains
@@ -89,7 +111,13 @@ class RecommendationsEngine:
         for platform in available_platforms:
             if platform != conflict.platform:
                 recommendations.append(Recommendation(
-                    id=str(uuid.uuid4()),
+                    id=stable_recommendation_id(
+                        "change_platform",
+                        f"Move {train2_id} from Platform {conflict.platform} to Platform {platform}",
+                        train2_id,
+                        conflict.station_id,
+                        platform,
+                    ),
                     action_type="change_platform",
                     description=f"Move {train2_id} from Platform {conflict.platform} to Platform {platform}",
                     train_id=train2_id,
@@ -111,7 +139,13 @@ class RecommendationsEngine:
         delay_needed = int(overlap_minutes + 5)  # Add 5 min buffer
         
         recommendations.append(Recommendation(
-            id=str(uuid.uuid4()),
+            id=stable_recommendation_id(
+                "delay_train",
+                f"Delay {train2_id} by {delay_needed} minutes to avoid platform conflict",
+                train2_id,
+                conflict.station_id,
+                delay_minutes=delay_needed,
+            ),
             action_type="delay_train",
             description=f"Delay {train2_id} by {delay_needed} minutes to avoid platform conflict",
             train_id=train2_id,
@@ -152,7 +186,13 @@ class RecommendationsEngine:
         
         # Option 1: Delay second train
         recommendations.append(Recommendation(
-            id=str(uuid.uuid4()),
+            id=stable_recommendation_id(
+                "delay_train",
+                f"Delay {train2_id} by {delay_needed} minutes to ensure safe headway",
+                train2_id,
+                conflict.station_id,
+                delay_minutes=delay_needed,
+            ),
             action_type="delay_train",
             description=f"Delay {train2_id} by {delay_needed} minutes to ensure safe headway",
             train_id=train2_id,
@@ -177,7 +217,13 @@ class RecommendationsEngine:
         for platform in available_platforms:
             if platform != conflict.platform:
                 recommendations.append(Recommendation(
-                    id=str(uuid.uuid4()),
+                    id=stable_recommendation_id(
+                        "change_platform",
+                        f"Move {train2_id} to Platform {platform} to avoid headway conflict",
+                        train2_id,
+                        conflict.station_id,
+                        platform,
+                    ),
                     action_type="change_platform",
                     description=f"Move {train2_id} to Platform {platform} to avoid headway conflict",
                     train_id=train2_id,
@@ -221,7 +267,13 @@ class RecommendationsEngine:
         
         # Option 1: Swap priorities by delaying low priority train
         recommendations.append(Recommendation(
-            id=str(uuid.uuid4()),
+            id=stable_recommendation_id(
+                "swap_priority",
+                f"Give priority to {high_priority_train} by delaying {low_priority_train}",
+                low_priority_train,
+                conflict.station_id,
+                delay_minutes=10,
+            ),
             action_type="swap_priority",
             description=f"Give priority to {high_priority_train} by delaying {low_priority_train}",
             train_id=low_priority_train,
@@ -263,7 +315,13 @@ class RecommendationsEngine:
                         potential_delay_reduction = min(delay_minutes, 10)  # Estimate improvement
                         
                         recommendations.append(Recommendation(
-                            id=str(uuid.uuid4()),
+                            id=stable_recommendation_id(
+                                "move_train",
+                                f"Move {entry.train_id} to Platform {platform} to reduce delay",
+                                entry.train_id,
+                                entry.station_id,
+                                platform,
+                            ),
                             action_type="move_train",
                             description=f"Move {entry.train_id} to Platform {platform} to reduce delay",
                             train_id=entry.train_id,
@@ -306,7 +364,13 @@ class RecommendationsEngine:
                         for alt_platform, alt_util in usage.items():
                             if alt_platform != platform and alt_util < 0.6:
                                 recommendations.append(Recommendation(
-                                    id=str(uuid.uuid4()),
+                                    id=stable_recommendation_id(
+                                        "move_train",
+                                        f"Move {entry.train_id} from overloaded Platform {platform} to Platform {alt_platform}",
+                                        entry.train_id,
+                                        station_id,
+                                        alt_platform,
+                                    ),
                                     action_type="move_train",
                                     description=f"Move {entry.train_id} from overloaded Platform {platform} to Platform {alt_platform}",
                                     train_id=entry.train_id,
