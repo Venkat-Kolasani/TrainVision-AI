@@ -17,19 +17,22 @@ class ILPOptimizer:
         self.min_headway = 5  # minimum minutes between trains on same platform
         
     def optimize(self, fixed_platforms: Optional[Dict[str, int]] = None, 
-                 active_delays: Optional[Dict[str, Dict]] = None) -> List[ScheduleEntry]:
+                 active_delays: Optional[Dict[str, Dict]] = None,
+                 legs_override: Optional[Dict[str, List[str]]] = None) -> List[ScheduleEntry]:
         """
         Solve the train scheduling problem using Integer Linear Programming
         """
         try:
-            return self._solve_ilp(fixed_platforms or {}, active_delays or {})
+            return self._solve_ilp(fixed_platforms or {}, active_delays or {}, legs_override)
         except Exception as e:
             logger.error(f"ILP optimization failed: {e}")
             # Fallback to greedy optimizer
-            from optimizer import greedy_optimizer
-            return greedy_optimizer(self.trains, self.stations, fixed_platforms)
+            from optimizer import greedy_optimizer, greedy_optimizer_with_delays
+            if active_delays:
+                return greedy_optimizer_with_delays(self.trains, self.stations, fixed_platforms, active_delays, legs_override)
+            return greedy_optimizer(self.trains, self.stations, fixed_platforms, legs_override)
     
-    def _solve_ilp(self, fixed_platforms: Dict[str, int], active_delays: Dict[str, Dict]) -> List[ScheduleEntry]:
+    def _solve_ilp(self, fixed_platforms: Dict[str, int], active_delays: Dict[str, Dict], legs_override: Optional[Dict[str, List[str]]] = None) -> List[ScheduleEntry]:
         """
         Core ILP solver implementation
         """
@@ -288,7 +291,8 @@ class ILPOptimizer:
 def ilp_optimizer(trains: List[Train], stations: Dict[str, Station], 
                   fixed_platforms: Optional[Dict[str, int]] = None,
                   active_delays: Optional[Dict[str, Dict]] = None,
-                  settings: Optional[OptimizerSettings] = None) -> List[ScheduleEntry]:
+                  settings: Optional[OptimizerSettings] = None,
+                  legs_override: Optional[Dict[str, List[str]]] = None) -> List[ScheduleEntry]:
     """
     Main entry point for ILP optimization
     """
@@ -296,4 +300,10 @@ def ilp_optimizer(trains: List[Train], stations: Dict[str, Station],
         settings = OptimizerSettings(mode="ilp")
     
     optimizer = ILPOptimizer(trains, stations, settings)
-    return optimizer.optimize(fixed_platforms, active_delays)
+    try:
+        return optimizer.optimize(fixed_platforms, active_delays, legs_override=legs_override)
+    except Exception:
+        from optimizer import greedy_optimizer_with_delays
+        if active_delays:
+            return greedy_optimizer_with_delays(trains, stations, fixed_platforms, active_delays, legs_override)
+        return greedy_optimizer(trains, stations, fixed_platforms, legs_override)

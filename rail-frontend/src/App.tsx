@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { notify } from './lib/notify';
 import { useDashboardShell } from './context/DashboardShellContext';
+import { useOperationsFeed } from './context/OperationsFeedContext';
+import { useSelection } from './context/SelectionContext';
 import type { WorkspaceTab } from './context/DashboardShellContext';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import { KpiSkeleton, MapSkeleton, TableSkeleton } from './components/ui/Skeleton';
-import { AlertsPanel } from './components/operations/AlertsPanel';
+import { AlertQueue } from './components/operations/AlertQueue';
+import { PlatformBoard } from './components/operations/PlatformBoard';
+import { TrackOccupancyPanel } from './components/operations/TrackOccupancyPanel';
 import { ScheduleTable } from './components/operations/ScheduleTable';
 import { TrainDetailDrawer } from './components/operations/TrainDetailDrawer';
-import { NetworkMap, MapLegend, type TrainPosition } from './components/operations/NetworkMap';
+import { NetworkMap, MapLegend } from './components/operations/NetworkMap';
 import { StatusBoard } from './components/operations/StatusBoard';
 import { OperationsPanel } from './components/operations/OperationsPanel';
 import { ActivityPanel } from './components/operations/ActivityPanel';
@@ -19,26 +23,9 @@ import { SectionCard } from './components/layout/SectionCard';
 import { Tabs } from './components/layout/Tabs';
 import { LiveRegion } from './components/layout/LiveRegion';
 import { computeKPIs as computeScheduleKPIs } from './lib/scheduleUtils';
-import { getConflictCount, normalizeActiveDelays } from './lib/apiNormalize';
 import { playAlertTone } from './hooks/useCommandCenter';
 import { PRODUCT_COPY } from './lib/productCopy';
-import type {
-  ScheduleEntry as ScheduleEntryType,
-  ActiveDelay,
-  ConflictsResponse,
-  Recommendation,
-  Train,
-  Station,
-} from './types/railway';
-
-interface ScheduleEntry {
-  train_id: string;
-  station_id: string;
-  assigned_platform: number;
-  actual_arrival: string;
-  actual_departure: string;
-  reason?: string;
-}
+import type { Recommendation } from './types/railway';
 
 interface AppProps {
   commandCenter?: {
@@ -53,34 +40,41 @@ interface AppProps {
   onApplyRecommendation?: (id: string) => void;
 }
 
-interface ScheduleResponse {
-  schedule: ScheduleEntry[];
-  delays_before_min: number[];
-  delays_after_min: number[];
-  reasons?: string[];
-}
-
-interface LogEntry {
-  timestamp: string;
-  action: string;
-  details: string;
-}
-
 export default function App({
   commandCenter,
-  recommendations = [],
+  recommendations: recommendationsProp,
   onApplyRecommendation,
 }: AppProps = {}) {
   const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-  const [trains, setTrains] = useState<Train[]>([]);
-  const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
-  const [baselineSchedule, setBaselineSchedule] = useState<ScheduleEntry[]>([]);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [stations, setStations] = useState<Station[]>([]);
-  const [previousSchedule, setPreviousSchedule] = useState<ScheduleEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedTrain, setSelectedTrain] = useState<string | null>(null);
+  const {
+    trains,
+    schedule,
+    baselineSchedule,
+    previousSchedule,
+    logs,
+    stations,
+    activeDelays,
+    trainPositions,
+    conflicts: _conflicts,
+    trackStatus,
+    recommendations: feedRecommendations,
+    websocketConnected,
+    loading: feedLoading,
+    initialLoadComplete,
+    lastUpdated,
+    isStale,
+    refreshAll,
+    conflictCount,
+    conflictList,
+  } = useOperationsFeed();
+
+  const recommendations = recommendationsProp ?? feedRecommendations;
+
+  const { selectedTrainId, selectedEntry, selectTrain, selectEntry, clearSelection } =
+    useSelection();
+
+  const [actionLoading, setActionLoading] = useState(false);
   const [overridePlatform, setOverridePlatform] = useState<number>(1);
   const [overrideMsg, setOverrideMsg] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -91,246 +85,29 @@ export default function App({
   const [liveAnnouncement, setLiveAnnouncement] = useState('');
   const [nowClock, setNowClock] = useState(new Date());
   const [animTick, setAnimTick] = useState(0);
-  const [activeDelays, setActiveDelays] = useState<ActiveDelay[]>([]);
-  const [trainPositions, setTrainPositions] = useState<TrainPosition[]>([]);
-  const [websocketConnected, setWebsocketConnected] = useState(false);
-  const [conflicts, setConflicts] = useState<ConflictsResponse>({});
-  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
-  const [lastSync, setLastSync] = useState<Date | null>(null);
   const [showClearDelaysConfirm, setShowClearDelaysConfirm] = useState(false);
-  const [ganttSelectedEntry, setGanttSelectedEntry] = useState<ScheduleEntryType | null>(null);
 
   const scheduleRef = useRef(schedule);
   scheduleRef.current = schedule;
 
+  const lastSync = lastUpdated.schedule ?? null;
+  const loading = feedLoading || actionLoading;
+
   const { updateStatus, registerActions, unregisterActions } = useDashboardShell();
 
-  const markSync = useCallback(() => {
-    setLastSync(new Date());
-  }, []);
+  const conflictTrainIds = useMemo(() => {
+    const ids = new Set<string>();
+    (conflictList ?? []).forEach((c) => (c.trains_involved || []).forEach((t) => ids.add(t)));
+    return ids;
+  }, [conflictList]);
 
-  // Removed conflict banner/context; app runs only on HYB–VSKP dataset
+  const handleTrainSelect = (trainId: string) => {
+    const entry = schedule.find((s) => s.train_id === trainId);
+    if (entry) selectEntry(entry);
+    else selectTrain(trainId);
+  };
 
-  // helpers & derived data
   const getTrain = (id: string) => trains.find((t) => t.id === id);
-
-  // Fetch stations from backend
-  async function fetchStations() {
-    try {
-      const res = await fetch(`${API_BASE}/stations`);
-      if (res.ok) {
-        const backendStations = await res.json();
-        // Map backend stations to our Station interface with Hyderabad station details
-        const stationDetails: Record<string, any> = {
-          'HYB': { station_name: 'Hyderabad Deccan', latitude: 17.385, longitude: 78.4867, is_junction: true },
-          'SC': { station_name: 'Secunderabad Junction', latitude: 17.4399, longitude: 78.5017, is_junction: true },
-          'KCG': { station_name: 'Kacheguda', latitude: 17.3753, longitude: 78.4983, is_junction: true }
-        };
-        
-        const mappedStations: Station[] = backendStations.map((s: any) => ({
-          id: s.id,
-          platforms: s.platforms,
-          station_code: s.id,
-          station_name: stationDetails[s.id]?.station_name || s.id,
-          latitude: stationDetails[s.id]?.latitude,
-          longitude: stationDetails[s.id]?.longitude,
-          is_junction: stationDetails[s.id]?.is_junction || false,
-        }));
-        setStations(mappedStations);
-      }
-    } catch (err) {
-      console.error('Error fetching stations:', err);
-    }
-  }
-
-
-  // WebSocket connection
-  const wsRef = useRef<WebSocket | null>(null);
-  const prevConflictCount = useRef(0);
-
-  useEffect(() => {
-    const connectWebSocket = () => {
-      const websocket = new WebSocket(`${API_BASE.replace(/^http/, 'ws')}/ws`);
-      
-      websocket.onopen = () => {
-        console.log('WebSocket connected');
-        setWebsocketConnected(true);
-        wsRef.current = websocket;
-      };
-      
-      websocket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('WebSocket received:', data);
-          if (data.type === 'train_positions') {
-            console.log('Setting train positions:', data.data);
-            setTrainPositions(data.data);
-          } else if (data.type === 'schedule_update') {
-            void fetchSchedule(true);
-            void fetchConflicts();
-            void fetchLogs();
-          }
-        } catch (error) {
-          console.error('WebSocket message error:', error);
-        }
-      };
-      
-      websocket.onclose = () => {
-        console.log('WebSocket disconnected');
-        setWebsocketConnected(false);
-        wsRef.current = null;
-        setTimeout(connectWebSocket, 3000);
-      };
-      
-      websocket.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setWebsocketConnected(false);
-      };
-    };
-    
-    connectWebSocket();
-    
-    return () => {
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
-  }, []);
-
-  // polling / refresh interval
-  useEffect(() => {
-    const loadInitial = async () => {
-      await Promise.all([
-        fetchStations(),
-        fetchDataset(),
-        fetchSchedule(),
-        fetchLogs(),
-        fetchActiveDelays(),
-        fetchTrainPositions(),
-        fetchConflicts(),
-        fetchTrackStatus(),
-      ]);
-      setInitialLoadComplete(true);
-    };
-    void loadInitial();
-    if (commandCenter?.pauseRefresh) {
-      const a = setInterval(() => setAnimTick((v) => v + 1), 150);
-      return () => clearInterval(a);
-    }
-    const t = setInterval(() => {
-      void fetchSchedule(true);
-      void fetchActiveDelays();
-      void fetchTrainPositions();
-      void fetchConflicts();
-      void fetchTrackStatus();
-      setNowClock(new Date());
-    }, 3000);
-    const a = setInterval(() => setAnimTick((v) => v + 1), 150);
-    return () => { clearInterval(t); clearInterval(a); };
-  }, [commandCenter?.pauseRefresh]);
-
-  async function fetchDataset() {
-    try {
-      const r = await fetch(`${API_BASE}/trains`);
-      if (!r.ok) return;
-      const data = await r.json();
-      setTrains(data);
-      markSync();
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  async function fetchSchedule(silent = false) {
-    if (!silent) setLoading(true);
-    try {
-      const r = await fetch(`${API_BASE}/schedule`);
-      if (!r.ok) return;
-      const data: ScheduleResponse = await r.json();
-      
-      // Store previous schedule for comparison (only if we have existing data)
-      if (schedule.length > 0 && baselineSchedule.length === 0) {
-        // First time: current schedule becomes baseline
-        setBaselineSchedule([...schedule]);
-      } else if (schedule.length > 0 && JSON.stringify(schedule) !== JSON.stringify(data.schedule)) {
-        // Update previous schedule only if data actually changed
-        setPreviousSchedule([...schedule]);
-      }
-      
-      // Force new array references to trigger re-renders
-      setSchedule([...data.schedule]);
-      
-      // Fetch baseline if not set
-      if (baselineSchedule.length === 0) {
-        try {
-          const baselineRes = await fetch(`${API_BASE}/baseline`);
-          if (baselineRes.ok) {
-            const baselineData = await baselineRes.json();
-            setBaselineSchedule([...baselineData]);
-          }
-        } catch (e) {
-          console.log('Could not fetch baseline');
-        }
-      }
-    } catch (e) {
-      console.error('Error fetching schedule:', e);
-    } finally {
-      if (!silent) setLoading(false);
-      markSync();
-    }
-  }
-
-  async function fetchLogs() {
-    try {
-      const r = await fetch(`${API_BASE}/log`);
-      if (!r.ok) return;
-      const data = await r.json();
-      setLogs([...data.slice(-50).reverse()]); // show recent first, force new array
-    } catch (e) {
-      // Silent error handling
-    }
-  }
-
-  async function fetchActiveDelays() {
-    try {
-      const r = await fetch(`${API_BASE}/active-delays`);
-      if (!r.ok) return;
-      const data = await r.json();
-      setActiveDelays(normalizeActiveDelays(data));
-    } catch (e) {
-      console.error('Error fetching active delays:', e);
-    }
-  }
-
-  async function fetchTrainPositions() {
-    try {
-      const r = await fetch(`${API_BASE}/train-positions`);
-      if (!r.ok) return;
-      const data = await r.json();
-      setTrainPositions(data);
-    } catch (e) {
-      console.error('Error fetching train positions:', e);
-    }
-  }
-
-  async function fetchConflicts() {
-    try {
-      const r = await fetch(`${API_BASE}/conflicts`);
-      if (r.ok) {
-        const data = await r.json();
-        setConflicts(data);
-      }
-    } catch (e) {
-      console.error('Error fetching conflicts:', e);
-    }
-  }
-
-  async function fetchTrackStatus() {
-    try {
-      await fetch(`${API_BASE}/track-status`);
-    } catch {
-      // optional endpoint
-    }
-  }
 
   async function clearAllDelays() {
     if (activeDelays.length === 0) {
@@ -342,7 +119,7 @@ export default function App({
 
   async function performClearDelays() {
     setShowClearDelaysConfirm(false);
-    setLoading(true);
+    setActionLoading(true);
     try {
       const r = await fetch(`${API_BASE}/clear-delays`, {
         method: "DELETE"
@@ -354,18 +131,13 @@ export default function App({
         return;
       }
       
-      await Promise.all([
-        fetchSchedule(),
-        fetchLogs(),
-        fetchActiveDelays()
-      ]);
-      
+      await refreshAll(true);
       notify.success(`Cleared ${resp.cleared_count} delays successfully`);
       
     } catch (e) {
       notify.error('Network error clearing delays');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   }
 
@@ -373,36 +145,26 @@ export default function App({
     try {
       const r = await fetch(`${API_BASE}/reset`, { method: 'POST' });
       if (!r.ok) return;
-      
-      // Clear local state
-      setBaselineSchedule([]);
-      setPreviousSchedule([]);
-      setSchedule([]);
-      
-      // Refresh everything
-      await fetchSchedule();
-      await fetchLogs();
+      await refreshAll(false);
     } catch (e) {
       console.error('Reset failed:', e);
     }
   }
 
+  const prevConflictCount = useRef(0);
+
+  useEffect(() => {
+    const a = setInterval(() => {
+      setNowClock(new Date());
+      setAnimTick((v) => v + 1);
+    }, commandCenter?.pauseRefresh ? 150 : 1000);
+    return () => clearInterval(a);
+  }, [commandCenter?.pauseRefresh]);
+
   const kpis = useMemo(
     () => computeScheduleKPIs(schedule, trains),
     [schedule, trains]
   );
-
-  const conflictCount = useMemo(() => getConflictCount(conflicts), [conflicts]);
-  const conflictList = useMemo(() => {
-    if (conflicts.conflicts?.length) return conflicts.conflicts;
-    return (conflicts.conflict_log || []).map((log, i) => ({
-      id: `log-${i}`,
-      type: log.type || 'track_conflict',
-      trains_involved: log.trains || [],
-      root_cause: log.track ? `Track ${log.track}` : undefined,
-      severity: 'medium',
-    }));
-  }, [conflicts]);
 
   const systemHealth = useMemo(() => {
     if (conflictCount > 0) return 'CONFLICTS' as const;
@@ -445,31 +207,22 @@ export default function App({
   useEffect(() => {
     registerActions({
       refreshAll: async () => {
-        setLoading(true);
-        setPreviousSchedule([...scheduleRef.current]);
-        await Promise.all([
-          fetchSchedule(true),
-          fetchLogs(),
-          fetchDataset(),
-          fetchActiveDelays(),
-          fetchConflicts(),
-          fetchTrackStatus(),
-        ]);
+        setActionLoading(true);
+        await refreshAll(false);
         setAnimTick((prev) => prev + 1);
-        setLoading(false);
+        setActionLoading(false);
       },
       resetSystem: async () => {
         await resetSystem();
         notify.success('System reset', 'Baseline schedule restored and overrides cleared.');
       },
       openAuditLogs: () => {
-        void fetchLogs();
         setWorkspaceTab('activity');
       },
       openWorkspaceTab: (tab) => setWorkspaceTab(tab),
     });
     return () => unregisterActions();
-  }, [registerActions, unregisterActions]);
+  }, [registerActions, unregisterActions, refreshAll]);
 
   const beforeEntries = useMemo(() => {
     if (baselineSchedule.length > 0) return baselineSchedule;
@@ -549,22 +302,21 @@ export default function App({
 
   // override handler
   async function openOverride(trainId: string) {
-    setSelectedTrain(trainId);
+    selectTrain(trainId, schedule.find((s) => s.train_id === trainId) ?? null);
     setOverridePlatform(1);
     setOverrideMsg("");
     setDelayImpact(null);
     setShowDelayWarning(false);
     setShowModal(true);
     
-    // Calculate initial delay impact for platform 1
     const impact = await calculateDelayImpact(trainId, 1);
     setDelayImpact(impact);
   }
 
   async function submitOverride(forceOverride: boolean = false) {
-    if (!selectedTrain) return;
+    if (!selectedTrainId) return;
     const stationId = schedule.find(
-      (s) => s.train_id === selectedTrain
+      (s) => s.train_id === selectedTrainId
     )?.station_id;
     if (!stationId) {
       setOverrideMsg("Train not found in current schedule");
@@ -575,20 +327,20 @@ export default function App({
     if (!forceOverride && delayImpact && delayImpact.difference > 2) {
       setShowDelayWarning(true);
       setPendingOverride({
-        trainId: selectedTrain,
+        trainId: selectedTrainId,
         stationId: stationId,
         platform: Number(overridePlatform)
       });
       return;
     }
     
-    setLoading(true);
+    setActionLoading(true);
     try {
       const r = await fetch(`${API_BASE}/override`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          train_id: selectedTrain,
+          train_id: selectedTrainId,
           station_id: stationId,
           new_platform: Number(overridePlatform),
         }),
@@ -633,18 +385,8 @@ export default function App({
         // Set last action for chatbot auto-explanation
       }
       
-      // Force state invalidation and refresh
-      setPreviousSchedule([...schedule]); // Store current as previous
-      setSchedule([]); // Clear current to force re-render
-      
-      // Wait a moment for backend to process
       await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Refresh all data
-      await Promise.all([
-        fetchSchedule(),
-        fetchLogs()
-      ]);
+      await refreshAll(true);
       
       setTimeout(() => {
         setShowModal(false);
@@ -654,7 +396,7 @@ export default function App({
     } catch (e) {
       setOverrideMsg("Network error");
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   }
   
@@ -689,7 +431,7 @@ export default function App({
           trainPositions={trainPositions}
           animTick={animTick}
           conflictCount={conflictCount}
-          conflicts={conflictList}
+          conflicts={conflictList ?? []}
           activeDelays={activeDelays}
           onTimePct={Number(kpis.ontimePct) || 0}
           recommendations={recommendations}
@@ -725,6 +467,8 @@ export default function App({
                   trains={trains}
                   trainPositions={trainPositions}
                   animTick={animTick}
+                  trackStatus={trackStatus}
+                  onTrainClick={handleTrainSelect}
                 />
               )}
               <div className="mt-3 flex items-center justify-between">
@@ -747,16 +491,53 @@ export default function App({
                       systemHealth={systemHealth}
                     />
                     <div className="mt-4">
-                      <AlertsPanel
-                        conflictCount={conflictCount}
-                        conflicts={conflictList}
+                      <AlertQueue
+                        conflicts={conflictList ?? []}
                         activeDelays={activeDelays}
+                        onSelectTrain={(trainId) => {
+                          const entry = schedule.find((s) => s.train_id === trainId);
+                          selectEntry(entry ?? { train_id: trainId, station_id: '', assigned_platform: 1, actual_arrival: '', actual_departure: '' });
+                        }}
                       />
                     </div>
+                    <PlatformBoard
+                      stations={stations}
+                      schedule={schedule}
+                      trains={trains}
+                      now={nowClock}
+                      onSelectTrain={(_trainId, entry) => selectEntry(entry)}
+                    />
+                    <TrackOccupancyPanel
+                      trackStatus={trackStatus}
+                      isStale={isStale('trackStatus')}
+                    />
+                    {recommendations.length > 0 && onApplyRecommendation && (
+                      <div className="mt-4 border-t border-slate-700/80 pt-4">
+                        <h3 className="mb-2 text-sm font-semibold text-white">Top recommendations</h3>
+                        <ul className="space-y-2">
+                          {recommendations.slice(0, 3).map((rec) => (
+                            <li
+                              key={rec.id}
+                              className="rounded border border-slate-700 bg-slate-800/40 p-2 text-xs"
+                            >
+                              <p className="text-slate-300">{rec.description}</p>
+                              <button
+                                type="button"
+                                className="mt-1 text-primary hover:underline"
+                                onClick={() => onApplyRecommendation(rec.id)}
+                              >
+                                Apply for {rec.train_id}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     <OperationsPanel
                       activeDelayCount={activeDelays.length}
+                      selectedTrainId={selectedTrainId}
                       onManualOverride={() => {
-                        const trainId = schedule[0]?.train_id;
+                        const trainId = selectedTrainId ?? schedule[0]?.train_id;
                         if (trainId) void openOverride(trainId);
                       }}
                       onClearDelays={clearAllDelays}
@@ -785,7 +566,9 @@ export default function App({
                         schedule={schedule}
                         trains={trains}
                         loading={false}
+                        conflictTrainIds={conflictTrainIds}
                         onOverride={openOverride}
+                        onRowClick={selectEntry}
                       />
                     </>
                   ),
@@ -801,8 +584,11 @@ export default function App({
                       afterEntries={afterEntries}
                       stations={stations}
                       trains={trains}
+                      conflicts={conflictList ?? []}
+                      trainPositions={trainPositions}
+                      now={nowClock}
                       animTick={animTick}
-                      onEntryClick={setGanttSelectedEntry}
+                      onEntryClick={selectEntry}
                     />
                   ),
                 },
@@ -823,26 +609,33 @@ export default function App({
       </div>
 
       <TrainDetailDrawer
-        entry={ganttSelectedEntry}
-        train={ganttSelectedEntry ? getTrain(ganttSelectedEntry.train_id) ?? null : null}
-        onClose={() => setGanttSelectedEntry(null)}
+        entry={selectedEntry}
+        train={selectedEntry ? getTrain(selectedEntry.train_id) ?? null : null}
+        onClose={clearSelection}
         onOverride={(trainId) => {
-          setGanttSelectedEntry(null);
+          clearSelection();
           void openOverride(trainId);
         }}
       />
 
       <OverrideModal
         open={showModal}
-        trainId={selectedTrain}
+        trainId={selectedTrainId}
         platform={overridePlatform}
+        maxPlatform={
+          selectedTrainId
+            ? stations.find(
+                (s) => s.id === schedule.find((e) => e.train_id === selectedTrainId)?.station_id
+              )?.platforms
+            : undefined
+        }
         message={overrideMsg}
         delayImpact={delayImpact}
         loading={loading}
         onPlatformChange={async (p) => {
           setOverridePlatform(p);
-          if (selectedTrain) {
-            const impact = await calculateDelayImpact(selectedTrain, p);
+          if (selectedTrainId) {
+            const impact = await calculateDelayImpact(selectedTrainId, p);
             setDelayImpact(impact);
           }
         }}

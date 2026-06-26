@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle, FlaskConical, Lightbulb } from 'lucide-react';
 import { notify } from '../lib/notify';
+import { diagnosticsEnabled } from '../lib/devFlags';
 
 interface Train {
   id: string;
@@ -23,6 +24,8 @@ export function ConflictTestingPanel({
   const [selectedTrain, setSelectedTrain] = useState<string>('');
   const [overridePlatform, setOverridePlatform] = useState<number>(1);
   const [loading, setLoading] = useState(false);
+
+  if (!diagnosticsEnabled) return null;
 
   const submitOverrideForTrain = async (
     trainId: string,

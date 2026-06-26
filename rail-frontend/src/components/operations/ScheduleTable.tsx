@@ -6,13 +6,15 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 
 type SortKey = 'train_id' | 'station_id' | 'assigned_platform' | 'actual_arrival';
-type StatusFilter = 'all' | 'on-time' | 'delayed' | 'overridden';
+type StatusFilter = 'all' | 'on-time' | 'delayed' | 'overridden' | 'conflict';
 
 interface ScheduleTableProps {
   schedule: ScheduleEntry[];
   trains: Train[];
   loading?: boolean;
+  conflictTrainIds?: Set<string>;
   onOverride: (trainId: string) => void;
+  onRowClick?: (entry: ScheduleEntry) => void;
 }
 
 const statusBadge = {
@@ -22,7 +24,14 @@ const statusBadge = {
   conflict: { label: 'Conflict', variant: 'danger' as const },
 };
 
-export function ScheduleTable({ schedule, trains, loading, onOverride }: ScheduleTableProps) {
+export function ScheduleTable({
+  schedule,
+  trains,
+  loading,
+  conflictTrainIds,
+  onOverride,
+  onRowClick,
+}: ScheduleTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('actual_arrival');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -54,7 +63,9 @@ export function ScheduleTable({ schedule, trains, loading, onOverride }: Schedul
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter((s) => getTrainStatus(s, trains) === statusFilter);
+      filtered = filtered.filter(
+        (s) => getTrainStatus(s, trains, conflictTrainIds) === statusFilter
+      );
     }
 
     filtered.sort((a, b) => {
@@ -73,7 +84,7 @@ export function ScheduleTable({ schedule, trains, loading, onOverride }: Schedul
     });
 
     return filtered;
-  }, [schedule, trains, search, typeFilter, statusFilter, sortKey, sortDir]);
+  }, [schedule, trains, search, typeFilter, statusFilter, sortKey, sortDir, conflictTrainIds]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -129,6 +140,7 @@ export function ScheduleTable({ schedule, trains, loading, onOverride }: Schedul
           <option value="on-time">On-time</option>
           <option value="delayed">Delayed</option>
           <option value="overridden">Overridden</option>
+          <option value="conflict">Conflict</option>
         </select>
       </div>
 
@@ -149,12 +161,13 @@ export function ScheduleTable({ schedule, trains, loading, onOverride }: Schedul
           <tbody>
             {rows.map((s, idx) => {
               const t = getTrainById(trains, s.train_id);
-              const status = getTrainStatus(s, trains);
+              const status = getTrainStatus(s, trains, conflictTrainIds);
               const badge = statusBadge[status];
               return (
                 <tr
                   key={`${s.train_id}-${s.station_id}`}
-                  className={`border-b border-slate-800 transition-colors hover:bg-slate-700/40 ${idx % 2 === 0 ? 'bg-slate-900/20' : ''}`}
+                  className={`border-b border-slate-800 transition-colors hover:bg-slate-700/40 ${idx % 2 === 0 ? 'bg-slate-900/20' : ''} ${onRowClick ? 'cursor-pointer' : ''}`}
+                  onClick={() => onRowClick?.(s)}
                 >
                   <td className="px-3 py-2 font-medium text-slate-100">{s.train_id}</td>
                   <td className="px-3 py-2 text-slate-300">{t?.type || '-'}</td>
@@ -171,7 +184,10 @@ export function ScheduleTable({ schedule, trains, loading, onOverride }: Schedul
                     <Button
                       variant="warning"
                       className="px-2 py-1 text-xs"
-                      onClick={() => onOverride(s.train_id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOverride(s.train_id);
+                      }}
                       disabled={loading}
                       aria-label={`Override ${s.train_id}`}
                     >

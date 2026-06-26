@@ -1,6 +1,23 @@
 # TrainVision AI Decision Support System [ SIH25022 ]
 
-A railway traffic decision-support system for the Hyderabad corridor (HYB, SC, KCG): live monitoring, conflict resolution, schedule optimization, and command-center wall-display mode.
+A railway **operations control center (OCC)** demo for the Hyderabad corridor (**HYB → SC → KCG**). Controllers monitor live trains, resolve platform conflicts, run what-if simulations, and review performance analytics—with optional AI assistance.
+
+## What this website does (in plain terms)
+
+TrainVision AI is **not** a ticketing or passenger app. It helps a **railway controller** answer:
+
+| Question | Where in the app |
+|----------|------------------|
+| Where are my trains right now? | **Operations** → network map + platform board |
+| Are any platforms double-booked? | **Operations** → alerts, conflict badges on schedule |
+| Can I move train X to platform Y safely? | **Operations** → select train → manual override (feasibility check) |
+| What happens if train T is delayed 15 minutes? | **Simulation** → run delay scenario, compare graphs |
+| How are we performing over time? | **Analytics** → KPIs, trends, station delay heatmap |
+| Why did the system make this decision? | **Activity** tab + AI chatbot |
+
+**Data flow (simplified):** train/station JSON → optimizer assigns platforms & times → conflict detector flags overlaps → UI polls API every 5s + WebSocket for live positions → controller can override or simulate changes.
+
+**Live demo:** [trainvision.vercel.app](https://trainvision.vercel.app/) · API docs: [trainvision-ai.onrender.com/docs](https://trainvision-ai.onrender.com/docs)
 
 ## Live Demo
 - **Frontend Application**: https://trainvision.vercel.app/
@@ -11,7 +28,25 @@ A railway traffic decision-support system for the Hyderabad corridor (HYB, SC, K
 
 ## Features
 
-### Command Center (Operations)
+### Command Center (Operations) — Phase 3C
+- **Conflict-aware schedule** — rows involved in active conflicts show a conflict badge; filter by conflict status
+- **Map click-through** — click a train on the map to open the train detail drawer
+- **Track link coloring** — inter-station links reflect `/track-status` occupancy
+- **Train graph live markers** — WebSocket position “head” on the active leg in timeline view
+- **Optimizer reliability** — greedy scheduler force-assigns legs at max delay (no dropped trains)
+- **Analytics fix** — trends heatmap + KPI charts; 5-minute trend buckets on the backend
+
+### Command Center (Operations) — Phase 3B
+- **Unified live feed** — Single `OperationsFeedProvider` polls schedule, conflicts, track status, and recommendations (no duplicate 3s/10s fetches)
+- **Train graph** — Occupation diagram with NOW line, baseline overlay, conflict hatch, corridor/compare modes
+- **Platform board** — Now/next grid per station platform; click-through to train drawer
+- **Alert queue** — Sortable triage with ack states; live situational **Context strip**
+- **Track occupancy** — `/track-status` wired in operations rail
+- **Selection workflow** — Manual override targets selected train (not `schedule[0]`)
+- **15-train corridor** — Multi-leg scheduling for through trains (HYB↔SC↔KCG)
+- **KPI trends** — `/analytics/trends` ring buffer with line charts in Analytics
+
+### Command Center (Operations) — Phase 3A
 - **Wall-display mode** — Press `F` or use **Command center** in the toolbar for fullscreen monitoring
 - **Status board** — Trains, on-time %, conflicts, average delay at a glance
 - **Tabbed workspace** — Schedule, Timeline (Gantt), and Activity (audit log)
@@ -155,17 +190,18 @@ npm run dev
 - Manual override and clear delays (operator actions only)
 
 ### 2. Simulation
+- Uses the **same live feed** as Operations for baseline schedule (no duplicate polling)
 - Scenario testing (delays, breakdowns, weather, priority changes)
-- Before/after impact analysis
-- Recommended actions for each scenario
-- Scenario history and comparison
+- Side-by-side KPI + dual train graphs when comparing two scenarios
+- Diff-highlighted schedule table vs live baseline
+- **Promote to live** applies top recommendation (with confirmation)
 
 ### 3. Analytics Dashboard
-- System performance metrics and KPIs
-- Delay analysis by station and train type
-- Platform utilization statistics
-- Conflict analysis and trends
-- Optimizer settings configuration
+- KPI cards, delay charts, platform utilization, conflict breakdown
+- **Live ops hints** from unified feed (conflicts + active delays)
+- **KPI trends** line chart (5-minute buckets via `/analytics/trends`)
+- **Station delay heatmap** across recent trend snapshots
+- Optimizer settings (greedy vs ILP)
 
 ## 🔧 API Endpoints
 
@@ -189,7 +225,8 @@ npm run dev
 - `GET /scenarios` - Get simulation history
 
 ### Analytics & Settings
-- `GET /analytics/summary` - Get comprehensive analytics
+- `GET /analytics/summary` - Get comprehensive analytics (also records a trend bucket)
+- `GET /analytics/trends` - Time-series KPI snapshots (5-minute buckets)
 - `GET /settings/optimizer` - Get optimizer settings
 - `POST /settings/optimizer` - Update optimizer settings
 
@@ -311,7 +348,54 @@ The system uses a realistic dataset featuring:
 
 ## 🛠️ Development
 
-### Project Structure
+### Project structure (where to look in the code)
+
+```
+TrainVision-AI/
+├── backend/
+│   ├── main.py              # FastAPI app: all REST + WebSocket routes
+│   ├── optimizer.py         # Greedy multi-leg scheduler (force-assign at max delay)
+│   ├── ilp_optimizer.py     # Optional ILP solver (PuLP / OR-Tools)
+│   ├── conflict_detector.py # Platform overlap, headway, priority conflicts
+│   ├── schedule_service.py  # Schedule recompute + read-only GET payload
+│   ├── train_legs.py        # Multi-station leg expansion per train
+│   ├── analytics_trends.py  # In-memory 5-min KPI trend buckets
+│   ├── data/                # prototype_trains.json (15 trains, 3 stations)
+│   ├── tests/               # pytest: optimizers, API, override, simulation
+│   └── requirements-dev.txt # CI/test deps (no optional Gemini package)
+├── rail-frontend/src/
+│   ├── AppWithDashboards.tsx    # Top nav: Operations | Simulation | Analytics
+│   ├── App.tsx                  # Operations OCC layout
+│   ├── context/
+│   │   ├── OperationsFeedContext.tsx  # Unified 5s poll + WebSocket
+│   │   └── SelectionContext.tsx       # Selected train for drawer/override
+│   └── components/
+│       ├── operations/          # Map, schedule table, train graph, alerts…
+│       ├── SimulationDashboard.tsx
+│       └── AnalyticsDashboard.tsx
+├── documentation.md           # Full technical reference (start here for depth)
+├── TESTING.md                 # How to run pytest / vitest / smoke scripts
+└── .github/workflows/ci.yml   # CI: backend pytest + frontend test + build
+```
+
+### Key frontend concepts
+
+| Concept | File | Purpose |
+|---------|------|---------|
+| Unified feed | `OperationsFeedContext.tsx` | One poll loop for schedule, conflicts, track status, positions |
+| Selection | `SelectionContext.tsx` | Which train/leg is open in the drawer |
+| Train graph | `operations/TrainGraph.tsx` | Time × platform occupation diagram |
+| Schedule status | `lib/scheduleUtils.ts` | on-time / delayed / overridden / **conflict** |
+
+### Key backend concepts
+
+| Concept | File | Purpose |
+|---------|------|---------|
+| Schedule state | `main.py` + `schedule_service.py` | In-memory schedule; `GET /schedule` is read-only |
+| Multi-leg | `train_legs.py` | Through trains visit HYB, SC, KCG in order |
+| Trends | `analytics_trends.py` | Deduped snapshots when `/analytics/summary` is called |
+
+### Project Structure (legacy tree)
 ```
 TrainVision-AI-Decision-Support/
 ├── backend/
@@ -420,11 +504,23 @@ BACKEND_URL=https://trainvision-ai.onrender.com
 - **Application logs**: Available via Render dashboard
 - **Performance**: Optimized for free tier limitations
 
+## 🧪 **Testing**
+
+See [TESTING.md](TESTING.md) for local commands:
+
+```bash
+./scripts/test-backend.sh    # pytest: optimizers + API + override/feasibility/simulation
+cd rail-frontend && npm run test && npm run build
+./scripts/e2e-smoke.sh       # API smoke + vitest (backend must be running)
+```
+
+CI runs the same checks on every push/PR via `.github/workflows/ci.yml`.
+
 ## 🧪 **Testing the Live System**
 
 ### **Frontend Testing** (https://trainvision.vercel.app/)
 1. **Dashboard Navigation**: Switch between Main, Simulation, and Analytics dashboards
-2. **Train Management**: View 6 active trains across HYB, SC, KCG stations
+2. **Train Management**: View 15 active trains across HYB, SC, KCG stations
 3. **AI ChatBot**: Click the bot icon and ask:
    - "How many trains are available?"
    - "What's happening at HYB station?"
@@ -446,19 +542,13 @@ BACKEND_URL=https://trainvision-ai.onrender.com
 
 ## 📚 Documentation
 
-For comprehensive technical documentation, including system architecture, algorithms, API reference, and development guide, see:
+| Document | Audience | Contents |
+|----------|----------|----------|
+| **[README.md](./README.md)** | Everyone | What the app does, quick start, feature list |
+| **[documentation.md](./documentation.md)** | Developers | Architecture, algorithms, API, component map |
+| **[TESTING.md](./TESTING.md)** | Contributors | pytest, vitest, manual OCC checklist |
 
-**[📖 Complete Technical Documentation](./documentation.md)**
-
-The documentation covers:
-- **System Architecture**: Detailed technical overview and component interactions
-- **Core Algorithms**: Greedy optimization, ILP solver, conflict detection, and AI recommendations
-- **API Reference**: Complete endpoint documentation with examples
-- **Data Models**: Comprehensive schema and data structure documentation
-- **Frontend Components**: React component architecture and state management
-- **AI Integration**: Gemini AI implementation and use cases
-- **Deployment Guide**: Production deployment on Vercel and Render
-- **Development Setup**: Local development environment and contribution guidelines
+**[📖 Complete Technical Documentation](./documentation.md)** — system architecture, greedy/ILP algorithms, API reference, frontend component guide, deployment.
 
 ## 🤝 Contributing
 

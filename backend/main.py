@@ -14,8 +14,13 @@ import time
 import logging
 import os
 from dotenv import load_dotenv
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None  # type: ignore
 import redis_bus
+from schedule_service import ensure_baseline, recompute_schedule, build_schedule_payload
+from analytics_trends import trend_store
 
 # Load environment variables
 load_dotenv()
@@ -100,18 +105,27 @@ app.add_middleware(
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-if GEMINI_API_KEY:
+if GEMINI_API_KEY and genai is not None:
     genai.configure(api_key=GEMINI_API_KEY)
     gemini_model = genai.GenerativeModel(GEMINI_MODEL)
 else:
     gemini_model = None
-    print("Warning: GEMINI_API_KEY not found in environment variables")
+    if not GEMINI_API_KEY:
+        print("Warning: GEMINI_API_KEY not found in environment variables")
+    elif genai is None:
+        print("Warning: google-generativeai not installed")
 
 # Load dataset
 with open("data/prototype_trains.json") as f:
     dataset = json.load(f)
 
-stations: Dict[str, Station] = {s["id"]: Station(**s) for s in dataset["stations"]}
+train_legs_override: Dict[str, List[str]] = dataset.get("train_legs", {})
+
+stations: Dict[str, Station] = {s["id"]: Station(**{k: v for k, v in s.items() if k in ("id", "platforms")}) for s in dataset["stations"]}
+station_metadata: Dict[str, Dict] = {
+    s["id"]: {k: v for k, v in s.items() if k not in ("id", "platforms")}
+    for s in dataset["stations"]
+}
 trains: List[Train] = [Train(**t) for t in dataset["trains"]]
 
 schedule: List[ScheduleEntry] = []
@@ -123,6 +137,41 @@ current_conflicts: List[Conflict] = []
 current_recommendations: List[Recommendation] = []
 optimizer_settings = OptimizerSettings()
 simulation_scenarios: Dict[str, Dict] = {}
+_schedule_initialized = False
+
+
+def ensure_schedule_state() -> None:
+    global schedule, baseline_schedule, current_conflicts, _schedule_initialized
+    if _schedule_initialized and schedule:
+        return
+    baseline_schedule = ensure_baseline(trains, stations, baseline_schedule, logs, train_legs_override)
+    old = copy.deepcopy(schedule)
+    schedule, current_conflicts, step = recompute_schedule(
+        trains, stations, fixed_overrides, active_delays, optimizer_settings, old, train_legs_override
+    )
+    optimization_history.append(step)
+    _schedule_initialized = True
+
+
+def run_schedule_recompute(log_audit: bool = True) -> None:
+    global schedule, baseline_schedule, current_conflicts
+    if not baseline_schedule:
+        baseline_schedule = ensure_baseline(trains, stations, baseline_schedule, logs, train_legs_override)
+    old = copy.deepcopy(schedule)
+    schedule, current_conflicts, step = recompute_schedule(
+        trains, stations, fixed_overrides, active_delays, optimizer_settings, old, train_legs_override
+    )
+    optimization_history.append(step)
+    if log_audit:
+        logs.append(
+            LogEntry(
+                timestamp=datetime.now(),
+                action="schedule_recomputed",
+                details=f"Recomputed schedule: {len(step.get('schedule_changes', []))} changes, {len(current_conflicts)} conflicts",
+            )
+        )
+    notify_realtime_clients("schedule_update", {"changes": len(step.get("schedule_changes", []))})
+
 
 @app.get("/trains")
 def get_trains():
@@ -140,129 +189,28 @@ def post_trains(payload: TrainDataset):
 
 @app.get("/schedule", response_model=ScheduleWithBaseline)
 def get_schedule():
-    global schedule, baseline_schedule, optimization_history, current_conflicts
-    
-    # Generate baseline schedule (no overrides, simple assignment)
-    if not baseline_schedule:
-        baseline_schedule = greedy_optimizer(trains, stations, {})
-        logs.append(LogEntry(
-            timestamp=datetime.now(), 
-            action="baseline_created", 
-            details=f"Generated baseline schedule with {len(baseline_schedule)} train assignments"
-        ))
-        
-        # Log baseline assignments
-        for s in baseline_schedule:
-            train = next((t for t in trains if t.id == s.train_id), None)
-            if train:
-                delay = (s.actual_arrival - train.scheduled_arrival).total_seconds() / 60.0
-                logs.append(LogEntry(
-                    timestamp=datetime.now(),
-                    action="baseline_assign",
-                    details=f"Baseline: {s.train_id} → {s.station_id} P{s.assigned_platform}, delay {delay:.1f}min, reason: {s.reason}"
-                ))
-    
-    # Generate optimized schedule with current overrides
-    old_schedule = copy.deepcopy(schedule)
-    
-    # Use ILP optimizer if enabled, otherwise use greedy
-    if optimizer_settings.mode == "ilp":
-        schedule = ilp_optimizer(trains, stations, fixed_overrides, active_delays, optimizer_settings)
-    else:
-        schedule = greedy_optimizer(trains, stations, fixed_overrides)
-    
-    # Detect conflicts in the new schedule
-    current_conflicts, conflict_impact = detect_conflicts(trains, stations, schedule)
-    
-    # Track optimization changes
-    optimization_step = {
-        "timestamp": datetime.now().isoformat(),
-        "overrides_applied": len(fixed_overrides),
-        "schedule_changes": [],
-        "conflicts_resolved": 0
-    }
-    
-    # Compare with previous schedule to detect changes
-    if old_schedule:
-        for new_entry in schedule:
-            old_entry = next((s for s in old_schedule if s.train_id == new_entry.train_id), None)
-            if not old_entry or old_entry.assigned_platform != new_entry.assigned_platform or old_entry.actual_arrival != new_entry.actual_arrival:
-                optimization_step["schedule_changes"].append({
-                    "train_id": new_entry.train_id,
-                    "old_platform": old_entry.assigned_platform if old_entry else "none",
-                    "new_platform": new_entry.assigned_platform,
-                    "reason": new_entry.reason
-                })
-    
-    optimization_history.append(optimization_step)
-    
-    logs.append(LogEntry(
-        timestamp=datetime.now(), 
-        action="schedule_optimized", 
-        details=f"Generated optimized schedule with {len(fixed_overrides)} overrides, {len(optimization_step['schedule_changes'])} changes"
-    ))
+    """Read-only schedule snapshot (does not re-optimize or append audit logs)."""
+    ensure_schedule_state()
+    return build_schedule_payload(schedule, baseline_schedule, trains, current_conflicts)
 
-    # Compute delays for before/after comparison
-    delays_after = []
-    delays_before = []
-    reasons = []
-    
-    for s in schedule:
-        train = next((t for t in trains if t.id == s.train_id), None)
-        if train:
-            # After optimization delay
-            delay_after = max(0.0, (s.actual_arrival - train.scheduled_arrival).total_seconds() / 60.0)
-            delays_after.append(delay_after)
-            
-            # Before optimization delay (from baseline)
-            baseline_entry = next((b for b in baseline_schedule if b.train_id == s.train_id), None)
-            if baseline_entry:
-                delay_before = max(0.0, (baseline_entry.actual_arrival - train.scheduled_arrival).total_seconds() / 60.0)
-                delays_before.append(delay_before)
-            else:
-                delays_before.append(0.0)
-            
-            reasons.append(s.reason)
-            
-            # Enhanced audit logging
-            conflict_info = ""
-            if "delayed" in s.reason:
-                conflict_info = " [CONFLICT RESOLVED]"
-            elif s.train_id in fixed_overrides:
-                conflict_info = " [MANUAL OVERRIDE]"
-            
-            logs.append(LogEntry(
-                timestamp=datetime.now(),
-                action="final_assignment",
-                details=f"✓ {s.train_id} ({train.type}, P{train.priority}) → {s.station_id} P{s.assigned_platform}, "
-                       f"scheduled: {train.scheduled_arrival.strftime('%H:%M')}, "
-                       f"actual: {s.actual_arrival.strftime('%H:%M')}, "
-                       f"delay: {delay_after:.1f}min, reason: {s.reason}{conflict_info}"
-            ))
 
-    return {
-        "schedule": schedule, 
-        "delays_after_min": delays_after, 
-        "delays_before_min": delays_before, 
-        "reasons": reasons,
-        "conflicts": [conflict.dict() for conflict in current_conflicts]
-    }
+@app.post("/schedule/recompute")
+def post_schedule_recompute():
+    run_schedule_recompute(log_audit=True)
+    return build_schedule_payload(schedule, baseline_schedule, trains, current_conflicts)
 
 
 @app.post("/override")
 def override_schedule(req: OverrideRequest):
     global fixed_overrides, schedule, optimization_history
     
-    # Log override request
+    ensure_schedule_state()
+
     logs.append(LogEntry(
         timestamp=datetime.now(),
         action="override_requested",
         details=f"Controller requests: Move {req.train_id} to Platform {req.new_platform} at {req.station_id}"
     ))
-    
-    # ensure schedule exists or recompute baseline first
-    if not schedule:
-        schedule = greedy_optimizer(trains, stations)
 
     # Validate platform exists
     station = stations.get(req.station_id)
@@ -294,19 +242,15 @@ def override_schedule(req: OverrideRequest):
         action="override_applied",
         details=f"🔧 Override APPLIED: {req.train_id} forced to P{req.new_platform} (was P{old_platform})"
     ))
-    
-    # Re-optimize with the forced override - optimizer will delay other trains if needed
+
     old_schedule = copy.deepcopy(schedule)
-    new_schedule = greedy_optimizer(trains, stations, fixed_overrides)
-    
-    # Track conflicts caused by override
+    run_schedule_recompute(log_audit=False)
+
     conflicts_caused = []
-    for new_entry in new_schedule:
-        old_entry = next((s for s in old_schedule if s.train_id == new_entry.train_id), None)
+    for new_entry in schedule:
+        old_entry = next((s for s in old_schedule if s.train_id == new_entry.train_id and s.station_id == new_entry.station_id), None)
         if old_entry and new_entry.train_id != req.train_id:
-            # Check if this train was affected by the override
-            if (old_entry.assigned_platform != new_entry.assigned_platform or 
-                old_entry.actual_arrival != new_entry.actual_arrival):
+            if old_entry.assigned_platform != new_entry.assigned_platform or old_entry.actual_arrival != new_entry.actual_arrival:
                 train = next((t for t in trains if t.id == new_entry.train_id), None)
                 if train:
                     old_delay = (old_entry.actual_arrival - train.scheduled_arrival).total_seconds() / 60.0
@@ -317,8 +261,7 @@ def override_schedule(req: OverrideRequest):
                         "new_platform": new_entry.assigned_platform,
                         "delay_change": new_delay - old_delay
                     })
-    
-    # Log conflicts caused
+
     for conflict in conflicts_caused:
         if conflict["delay_change"] > 0:
             logs.append(LogEntry(
@@ -332,9 +275,7 @@ def override_schedule(req: OverrideRequest):
                 action="conflict_resolution",
                 details=f"🔄 REBALANCE: {conflict['train_id']} moved P{conflict['old_platform']}→P{conflict['new_platform']} due to override"
             ))
-    
-    # Commit the new schedule
-    schedule = new_schedule
+
     reason_for_train = next((s.reason for s in schedule if s.train_id == req.train_id), "re-optimized")
     
     # Final success log
@@ -367,7 +308,7 @@ def get_baseline():
     """Get the baseline schedule for comparison"""
     global baseline_schedule
     if not baseline_schedule:
-        baseline_schedule = greedy_optimizer(trains, stations, {})
+        baseline_schedule = greedy_optimizer(trains, stations, {}, legs_override=train_legs_override)
     return baseline_schedule
 
 @app.post("/reset")
@@ -426,7 +367,11 @@ def get_system_stats():
 
 @app.get("/stations")
 def get_stations():
-    return list(stations.values())
+    result = []
+    for st in stations.values():
+        meta = station_metadata.get(st.id, {})
+        result.append({**st.dict(), **meta})
+    return result
 
 @app.post("/simulate-override")
 def simulate_override(req: OverrideRequest):
@@ -1287,12 +1232,7 @@ def _resolve_recommendation(recommendation_id: str) -> Optional[Recommendation]:
 
 
 def _reoptimize_schedule_after_recommendation() -> None:
-    global schedule, active_delays, fixed_overrides, current_conflicts
-    if active_delays:
-        schedule = greedy_optimizer_with_delays(trains, stations, fixed_overrides, active_delays)
-    else:
-        schedule = greedy_optimizer(trains, stations, fixed_overrides)
-    current_conflicts, _ = detect_conflicts(trains, stations, schedule)
+    run_schedule_recompute(log_audit=False)
 
 
 @app.post("/apply-recommendation")
@@ -1494,6 +1434,7 @@ def update_optimizer_settings(settings: OptimizerSettings):
 @app.get("/analytics/summary")
 def get_analytics_summary():
     """Get comprehensive analytics summary"""
+    ensure_schedule_state()
     if not schedule:
         return {"error": "No schedule data available"}
     
@@ -1559,7 +1500,7 @@ def get_analytics_summary():
             conflicts_analysis["by_severity"][severity] = 0
         conflicts_analysis["by_severity"][severity] += 1
     
-    return {
+    payload = {
         "summary": {
             "total_trains": total_trains,
             "on_time_trains": on_time_trains,
@@ -1577,6 +1518,21 @@ def get_analytics_summary():
         "optimizer_mode": optimizer_settings.mode,
         "last_updated": datetime.now().isoformat()
     }
+    trend_store.record({
+        "on_time_percentage": payload["summary"]["on_time_percentage"],
+        "average_delay_minutes": payload["summary"]["average_delay_minutes"],
+        "conflict_count": len(current_conflicts),
+        "active_delays": len(active_delays),
+        "delays_by_station": avg_delays_by_station,
+    })
+    return payload
+
+
+@app.get("/analytics/trends")
+def get_analytics_trends():
+    ensure_schedule_state()
+    return {"points": trend_store.list()}
+
 
 # Gemini AI Integration Endpoints
 @app.post("/ai/analyze-schedule")

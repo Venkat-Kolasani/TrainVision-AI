@@ -11,6 +11,8 @@ import {
 } from '../../lib/operationsApi';
 import { DelayInjectionModal } from './DelayInjectionModal';
 
+import { diagnosticsEnabled } from '../../lib/devFlags';
+
 interface SimulationDiagnosticsProps {
   trains: { id: string }[];
   onRefresh: () => Promise<void>;
@@ -24,6 +26,8 @@ export function SimulationDiagnostics({ trains, onRefresh }: SimulationDiagnosti
   const [delayType, setDelayType] = useState('breakdown');
   const [delayMinutes, setDelayMinutes] = useState(15);
   const [delayReason, setDelayReason] = useState('');
+
+  if (!diagnosticsEnabled) return null;
 
   const run = async (action: () => Promise<void>, success: string) => {
     setLoading(true);

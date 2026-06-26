@@ -7,6 +7,7 @@ import {
   isDelayedEntry,
 } from '../../lib/scheduleUtils';
 import type { ScheduleEntry, Station, Train } from '../../types/railway';
+import type { TrackStatusResponse } from '../../context/OperationsFeedContext';
 
 export interface TrainPosition {
   train_id: string;
@@ -24,6 +25,8 @@ export interface NetworkMapProps {
   trains: Train[];
   trainPositions: TrainPosition[];
   animTick: number;
+  trackStatus?: TrackStatusResponse | null;
+  onTrainClick?: (trainId: string) => void;
   compact?: boolean;
   className?: string;
 }
@@ -124,6 +127,8 @@ export function NetworkMap({
   trains,
   trainPositions,
   animTick,
+  trackStatus,
+  onTrainClick,
   compact = false,
   className = '',
 }: NetworkMapProps) {
@@ -148,8 +153,30 @@ export function NetworkMap({
 
       occupancy[routeKey].conflicts = occupancy[routeKey].trains.length > route.tracks;
     });
+
+    const apiOccupancy = trackStatus?.track_occupancy;
+    if (apiOccupancy && typeof apiOccupancy === 'object') {
+      Object.entries(apiOccupancy).forEach(([trackId, info]) => {
+        const normalized = trackId.replace('->', '-');
+        const [from, to] = trackId.includes('->') ? trackId.split('->') : trackId.split('-');
+        const routeKey = from && to ? `${from}-${to}` : normalized;
+        if (!occupancy[routeKey]) {
+          occupancy[routeKey] = { trains: [], conflicts: false };
+        }
+        const trainId =
+          typeof info === 'object' && info !== null && 'train_id' in info
+            ? String((info as { train_id: string }).train_id)
+            : null;
+        if (trainId && !occupancy[routeKey].trains.includes(trainId)) {
+          occupancy[routeKey].trains.push(trainId);
+        }
+        occupancy[routeKey].conflicts =
+          occupancy[routeKey].conflicts || occupancy[routeKey].trains.length > 1;
+      });
+    }
+
     return occupancy;
-  }, [schedule, trains]);
+  }, [schedule, trains, trackStatus]);
 
   const nodes = useMemo((): MapNode[] => {
     const padding = 40;
@@ -178,8 +205,9 @@ export function NetworkMap({
     return stations.map((st) => {
       const pos = STATION_POSITIONS[st.id];
       if (pos) return { id: st.id, x: pos.x, y: pos.y, platforms: pos.platforms };
-      const fallbackX = padding + Math.random() * (MAP_WIDTH - 2 * padding);
-      const fallbackY = padding + Math.random() * (MAP_HEIGHT - 2 * padding);
+      const hash = st.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+      const fallbackX = padding + ((hash % 70) / 100) * (MAP_WIDTH - 2 * padding);
+      const fallbackY = padding + (((hash * 3) % 70) / 100) * (MAP_HEIGHT - 2 * padding);
       return { id: st.id, x: fallbackX, y: fallbackY, platforms: st.platforms || 2 };
     });
   }, [stations]);
@@ -318,7 +346,9 @@ export function NetworkMap({
                     (rt.from === cur.station_id && rt.to === next.station_id) ||
                     (rt.to === cur.station_id && rt.from === next.station_id),
                 );
-                const trackNumber = route ? Math.floor(Math.random() * route.tracks) + 1 : 1;
+                const trackNumber = route
+                  ? ((tid.charCodeAt(tid.length - 1) || 1) % route.tracks) + 1
+                  : 1;
 
                 dots.push({
                   id: tid,
@@ -520,7 +550,16 @@ export function NetworkMap({
             <g
               key={t.id}
               transform={`translate(${t.x}, ${t.y})`}
-              style={{ transition: 'transform 0.5s ease-in-out' }}
+              style={{ transition: 'transform 0.5s ease-in-out', cursor: onTrainClick ? 'pointer' : undefined }}
+              onClick={() => onTrainClick?.(t.id)}
+              role={onTrainClick ? 'button' : undefined}
+              tabIndex={onTrainClick ? 0 : undefined}
+              onKeyDown={(e) => {
+                if (onTrainClick && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault();
+                  onTrainClick(t.id);
+                }
+              }}
             >
               <g className={isMoving ? 'animate-pulse' : ''}>
                 <ellipse cx={0} cy={2} rx={10} ry={4} fill="black" opacity={0.2} />

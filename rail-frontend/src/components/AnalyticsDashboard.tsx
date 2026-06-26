@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BarChart3, PieChart, TrendingUp, AlertCircle, Clock, Train, Settings, RefreshCw } from 'lucide-react';
 import {
   Bar,
   BarChart,
   Cell,
+  Line,
+  LineChart,
   Pie,
   PieChart as RechartsPie,
   ResponsiveContainer,
@@ -14,6 +16,7 @@ import {
 import { PageHeader } from './layout/PageHeader';
 import { Button } from './ui/Button';
 import { PRODUCT_COPY } from '../lib/productCopy';
+import { useOperationsFeed } from '../context/OperationsFeedContext';
 
 interface AnalyticsData {
   summary: {
@@ -45,6 +48,8 @@ interface OptimizerSettings {
 }
 
 const AnalyticsDashboard: React.FC = () => {
+  const { conflictCount, activeDelays } = useOperationsFeed();
+
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [optimizerSettings, setOptimizerSettings] = useState<OptimizerSettings>({
@@ -54,24 +59,50 @@ const AnalyticsDashboard: React.FC = () => {
   });
   const [showSettings, setShowSettings] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [trends, setTrends] = useState<
+    Array<{
+      timestamp: string;
+      on_time_percentage: number;
+      average_delay_minutes: number;
+      conflict_count: number;
+      delays_by_station?: Record<string, number>;
+    }>
+  >([]);
 
   const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   useEffect(() => {
     fetchAnalytics();
     fetchOptimizerSettings();
+    fetchTrends();
     
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchAnalytics, 30000);
+    const interval = setInterval(() => {
+      void fetchAnalytics();
+      void fetchTrends();
+    }, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const fetchTrends = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/analytics/trends`);
+      if (response.ok) {
+        const data = await response.json();
+        setTrends(data.points || []);
+      }
+    } catch (error) {
+      console.error('Error fetching trends:', error);
+    }
+  };
 
   const fetchAnalytics = async () => {
     try {
       const response = await fetch(`${API_BASE}/analytics/summary`);
       if (response.ok) {
         const data = await response.json();
-        setAnalytics(data);
+        if (data.summary) {
+          setAnalytics(data);
+        }
       }
     } catch (error) {
       console.error('Error fetching analytics:', error);
@@ -114,7 +145,25 @@ const AnalyticsDashboard: React.FC = () => {
 
   const refreshAnalytics = async () => {
     setLoading(true);
-    await fetchAnalytics();
+    await Promise.all([fetchAnalytics(), fetchTrends()]);
+  };
+
+  const heatmapStations = useMemo(() => {
+    const ids = new Set<string>();
+    Object.keys(analytics?.delays_by_station ?? {}).forEach((s) => ids.add(s));
+    trends.forEach((t) =>
+      Object.keys(t.delays_by_station ?? {}).forEach((s) => ids.add(s))
+    );
+    return [...ids].sort();
+  }, [analytics, trends]);
+
+  const heatmapColumns = useMemo(() => trends.slice(-12), [trends]);
+
+  const heatColor = (delay: number) => {
+    if (delay <= 2) return 'bg-green-600/80';
+    if (delay <= 5) return 'bg-yellow-600/80';
+    if (delay <= 10) return 'bg-orange-600/80';
+    return 'bg-red-600/80';
   };
 
   if (loading && !analytics) {
@@ -198,6 +247,14 @@ const AnalyticsDashboard: React.FC = () => {
           }
         />
 
+        {(conflictCount > 0 || activeDelays.length > 0) && (
+          <div className="mb-6 rounded-lg border border-slate-700 bg-surface-2 px-4 py-3 text-sm text-slate-300">
+            Live operations feed:{' '}
+            <span className="font-mono text-danger">{conflictCount}</span> conflicts ·{' '}
+            <span className="font-mono text-warning">{activeDelays.length}</span> active delays
+          </div>
+        )}
+
         {/* Key Performance Indicators */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="bg-surface-2 rounded-lg p-6 border border-slate-700">
@@ -243,6 +300,117 @@ const AnalyticsDashboard: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {trends.length === 0 && (
+          <div className="mb-8 rounded-lg border border-dashed border-slate-600 bg-surface-2 p-6 text-center text-slate-400">
+            Refresh analytics to start recording trends (5-minute buckets).
+          </div>
+        )}
+
+        {trends.length > 0 && (
+          <div className="mb-8 rounded-lg border border-slate-700 bg-surface-2 p-6">
+            <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold">
+              <TrendingUp className="h-5 w-5" />
+              KPI trends
+            </h2>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trends}>
+                  <XAxis
+                    dataKey="timestamp"
+                    stroke="#94a3b8"
+                    fontSize={10}
+                    tickFormatter={(v) => new Date(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  />
+                  <YAxis yAxisId="left" stroke="#94a3b8" fontSize={12} />
+                  <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: 8 }}
+                    labelFormatter={(v) => new Date(v).toLocaleString()}
+                  />
+                  <Line
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="on_time_percentage"
+                    stroke="#22c55e"
+                    dot={false}
+                    name="On-time %"
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="average_delay_minutes"
+                    stroke="#f59e0b"
+                    dot={false}
+                    name="Avg delay (min)"
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="conflict_count"
+                    stroke="#ef4444"
+                    dot={false}
+                    name="Conflicts"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {heatmapStations.length > 0 && heatmapColumns.length > 0 && (
+          <div className="mb-8 rounded-lg border border-slate-700 bg-surface-2 p-6">
+            <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold">
+              <BarChart3 className="h-5 w-5" />
+              Station delay heatmap
+            </h2>
+            <p className="mb-4 text-xs text-slate-500">
+              Average delay (minutes) per station across recent 5-minute trend buckets
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[480px] border-collapse text-xs">
+                <thead>
+                  <tr>
+                    <th className="p-2 text-left text-slate-400">Station</th>
+                    {heatmapColumns.map((col) => (
+                      <th key={col.timestamp} className="p-2 text-center text-slate-500 font-normal">
+                        {new Date(col.timestamp).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {heatmapStations.map((stationId) => (
+                    <tr key={stationId}>
+                      <td className="p-2 font-mono text-slate-300">{stationId}</td>
+                      {heatmapColumns.map((col) => {
+                        const delay =
+                          col.delays_by_station?.[stationId] ??
+                          (col.timestamp === heatmapColumns[heatmapColumns.length - 1]?.timestamp
+                            ? analytics?.delays_by_station[stationId]
+                            : undefined) ??
+                          0;
+                        return (
+                          <td key={`${stationId}-${col.timestamp}`} className="p-1">
+                            <div
+                              className={`flex h-8 items-center justify-center rounded font-mono text-white ${heatColor(delay)}`}
+                              title={`${stationId}: ${delay.toFixed(1)}m`}
+                            >
+                              {delay.toFixed(0)}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           {/* Delays by Station */}

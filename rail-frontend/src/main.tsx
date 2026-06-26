@@ -4,11 +4,17 @@ import { Toaster } from 'sonner'
 import './index.css'
 import AppWithDashboards from './AppWithDashboards.tsx'
 import { DashboardShellProvider } from './context/DashboardShellContext.tsx'
+import { OperationsFeedProvider } from './context/OperationsFeedContext.tsx'
+import { SelectionProvider } from './context/SelectionContext.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <DashboardShellProvider>
-      <AppWithDashboards />
+      <OperationsFeedProvider>
+        <SelectionProvider>
+          <AppWithDashboards />
+        </SelectionProvider>
+      </OperationsFeedProvider>
       <Toaster
         theme="dark"
         position="top-right"

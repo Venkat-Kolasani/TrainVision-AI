@@ -12,6 +12,7 @@ interface OverrideModalProps {
   open: boolean;
   trainId: string | null;
   platform: number;
+  maxPlatform?: number;
   message: string;
   delayImpact: DelayImpact | null;
   loading?: boolean;
@@ -24,6 +25,7 @@ export function OverrideModal({
   open,
   trainId,
   platform,
+  maxPlatform = 6,
   message,
   delayImpact,
   loading,
@@ -71,10 +73,12 @@ export function OverrideModal({
           <input
             type="number"
             min={1}
+            max={maxPlatform}
             value={platform}
             onChange={(e) => onPlatformChange(Number(e.target.value))}
             className="mt-1 w-full rounded border border-slate-600 bg-surface-1 px-3 py-2 font-mono text-slate-100 focus:border-primary focus:outline-none"
           />
+          <span className="mt-1 block text-[10px] text-slate-500">Platforms 1–{maxPlatform}</span>
         </label>
         {delayImpact && (
           <div

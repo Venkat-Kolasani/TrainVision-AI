@@ -1,16 +1,92 @@
 # TrainVision AI - Technical Documentation
 
+> **New here?** Read [README.md](./README.md) first for a plain-language overview of what the website does and how to run it locally.
+
 ## Table of Contents
-1. [System Overview](#system-overview)
-2. [Architecture](#architecture)
-3. [Core Algorithms](#core-algorithms)
-4. [Data Models](#data-models)
-5. [API Endpoints](#api-endpoints)
-6. [Frontend Components](#frontend-components)
-7. [AI Integration](#ai-integration)
-8. [Deployment](#deployment)
-9. [Use Cases](#use-cases)
-10. [Development Guide](#development-guide)
+1. [What the application does](#what-the-application-does)
+2. [Code map (read this to navigate the repo)](#code-map-read-this-to-navigate-the-repo)
+3. [System Overview](#system-overview)
+4. [Architecture](#architecture)
+5. [Core Algorithms](#core-algorithms)
+6. [Data Models](#data-models)
+7. [API Endpoints](#api-endpoints)
+8. [Frontend Components](#frontend-components)
+9. [AI Integration](#ai-integration)
+10. [Deployment](#deployment)
+11. [Use Cases](#use-cases)
+12. [Development Guide](#development-guide)
+
+## What the application does
+
+TrainVision AI simulates a **railway operations control center** for three connected stations:
+
+| Station | Role |
+|---------|------|
+| **HYB** (Hyderabad) | Origin/terminus, 4 platforms |
+| **SC** (Secunderabad) | Junction, 6 platforms |
+| **KCG** (Kacheguda) | Origin/terminus, 3 platforms |
+
+The backend **assigns each train to platforms and times** using a greedy or ILP optimizer. When two trains want the same platform at the same time, the system either delays one train or moves it to another platform, then **records why** in the schedule `reason` field and audit log.
+
+The frontend has **three screens**:
+
+1. **Operations** — day-to-day monitoring: map, schedule table, timeline graph, overrides.
+2. **Simulation** — “what if” scenarios without changing live state until you promote a recommendation.
+3. **Analytics** — KPIs, charts, and 5-minute trend history.
+
+Controllers interact through **selection** (click train → drawer), **overrides** (`POST /override`), and **recommendations** (`POST /apply-recommendation`).
+
+## Code map (read this to navigate the repo)
+
+### Request lifecycle (happy path)
+
+```
+Browser loads AppWithDashboards
+  → OperationsFeedProvider polls GET /schedule, /conflicts, /track-status (5s)
+  → WebSocket /ws for train positions
+  → User clicks Override
+  → POST /override → schedule_service.recompute_schedule()
+  → greedy_optimizer() or ilp_optimizer() rebuilds all legs
+  → detect_conflicts() → UI updates on next poll
+```
+
+### Backend files
+
+| File | Responsibility |
+|------|----------------|
+| `main.py` | FastAPI routes, global schedule state, WebSocket, simulation endpoints |
+| `schedule_service.py` | `ensure_schedule_state()`, `recompute_schedule()`, read-only schedule JSON |
+| `optimizer.py` | Greedy scheduler; multi-leg loop; force-assign at `MAX_DELAY` |
+| `train_legs.py` | Which stations each train visits (from JSON `train_legs` or origin→destination) |
+| `conflict_detector.py` | Returns `Conflict` list + impact metrics |
+| `analytics_trends.py` | Ring buffer of KPI snapshots (5-minute bucket dedupe) |
+| `data/prototype_trains.json` | 15 trains, station metadata, leg definitions |
+
+### Frontend files
+
+| File | Responsibility |
+|------|----------------|
+| `AppWithDashboards.tsx` | Shell: nav tabs, recommendations panel, routes to 3 dashboards |
+| `App.tsx` | Operations layout: map, rail, schedule/timeline/activity tabs |
+| `context/OperationsFeedContext.tsx` | Single source of truth for live API data |
+| `context/SelectionContext.tsx` | `selectedTrainId` / `selectedEntry` for drawer + override target |
+| `components/operations/TrainGraph.tsx` | Time × platform bars, NOW line, live WS head markers |
+| `components/operations/NetworkMap.tsx` | SVG corridor map; track occupancy colors; train click |
+| `components/operations/ScheduleTable.tsx` | Sortable/filterable schedule; conflict badges |
+| `components/SimulationDashboard.tsx` | Scenarios; compare mode; promote-to-live |
+| `components/AnalyticsDashboard.tsx` | KPIs, trends, heatmap (hooks must run before any early `return`) |
+| `lib/scheduleUtils.ts` | `getTrainStatus()`, delay helpers, KPI computation |
+
+### Tests & CI
+
+| Path | What it checks |
+|------|----------------|
+| `backend/tests/test_optimizer.py` | All trains/legs scheduled; no dropped legs |
+| `backend/tests/test_override.py` | Override API + schedule stability |
+| `backend/tests/test_feasibility.py` | Feasibility scores returned |
+| `backend/tests/test_simulation.py` | Delay simulation payload |
+| `rail-frontend/src/**/*.test.tsx` | Component smoke tests |
+| `.github/workflows/ci.yml` | pytest + vitest + build on push/PR |
 
 ## System Overview
 
@@ -62,7 +138,7 @@ TrainVision AI is a comprehensive railway traffic management and optimization sy
 - **Frontend**: Vercel (https://trainvision.vercel.app/)
 - **Backend**: Render (https://trainvision-ai.onrender.com/)
 - **Containerization**: Docker with multi-stage builds
-- **CI/CD**: GitHub Actions (removed failing workflow)
+- **CI/CD**: GitHub Actions (`.github/workflows/ci.yml` — pytest + vitest + build)
 
 ## Core Algorithms
 
@@ -653,6 +729,36 @@ GET  /ai/status              # Check Gemini AI configuration
 
 **Accessibility**: See `rail-frontend/ACCESSIBILITY.md` (keyboard shortcuts, `aria-live`, reduced motion).
 
+### Phase 3B / 3C — Unified feed & OCC polish
+
+**Shared data layer** (`rail-frontend/src/context/`):
+- `OperationsFeedContext` — single 5s poll + WebSocket for trains, schedule, conflicts, track status, positions
+- `SelectionContext` — selected train/entry for drawer and map click-through
+
+**Operations upgrades (Phase 3B–3C)**:
+- `TrainGraph` — occupation / corridor / compare modes; live WS head markers on active legs (Phase 3C)
+- `PlatformBoard`, `AlertQueue`, `TrackOccupancyPanel` — operations rail widgets
+- `ScheduleTable` — conflict badge via `conflictTrainIds` from feed; row click opens drawer (Phase 3C)
+- `NetworkMap` — track link coloring from `/track-status`; train dot click → selection drawer (Phase 3C)
+- `GET /schedule` read-only; `POST /schedule/recompute` for mutations
+
+**Simulation dashboard (Phase 3B–3C)**:
+- Consumes `useOperationsFeed()` for live baseline schedule (no duplicate fetch)
+- Side-by-side scenario KPI compare + dual `TrainGraph` when a compare scenario is selected
+- Schedule diff table highlights rows where platform/time differs from live baseline
+- Promote-to-live via `/apply-recommendation` with confirmation dialog
+
+**Analytics dashboard (Phase 3B–3C)**:
+- Live ops feed hints (conflicts, active delays) from unified feed
+- KPI trends line chart from `GET /analytics/trends` (5-minute buckets, deduped server-side)
+- Station delay heatmap across recent trend buckets
+- Empty state when no trend data: “Refresh analytics to start recording trends”
+
+**Backend reliability (Phase 3C)**:
+- Greedy optimizer force-assigns legs at `MAX_DELAY` instead of dropping trains
+- `analytics_trends.py` buckets snapshots to 5-minute intervals
+- Expanded pytest: override, feasibility, simulation; CI uses `requirements-dev.txt` (no optional Gemini dep)
+
 ### Production Real-time (optional Redis)
 
 Gunicorn multi-worker deployments use `backend/redis_bus.py` for pub/sub. Schedule mutations call `notify_realtime_clients()`; WebSocket clients receive `schedule_update` events. Set `REDIS_URL` in production; `GET /health` reports Redis status.
@@ -686,21 +792,22 @@ Railway operations console:
 
 **Location**: `rail-frontend/src/components/SimulationDashboard.tsx`
 
-Scenario testing interface:
-- **Delay Simulation**: Test impact of train delays
-- **Breakdown Simulation**: Analyze breakdown scenarios
-- **Weather Impact**: Simulate weather-related delays
-- **Priority Changes**: Test priority modifications
+Scenario testing interface (Phase 3C depth):
+- **Unified feed baseline** — live schedule from `OperationsFeedContext`
+- **Delay / breakdown / weather / priority** simulations via `POST /simulate/*`
+- **Side-by-side compare** — KPI cards and dual `TrainGraph` for two stored scenarios
+- **Diff-highlighted schedule table** — changed platform/time rows vs live baseline
+- **Promote to live** — applies top recommendation with confirm dialog
 
 ### 4. Analytics Dashboard
 
 **Location**: `rail-frontend/src/components/AnalyticsDashboard.tsx`
 
-Performance monitoring and insights:
-- **System KPIs**: Comprehensive performance metrics
-- **Delay Analysis**: Breakdown by station and train type
-- **Platform Utilization**: Usage statistics and optimization
-- **Conflict Trends**: Historical conflict analysis
+Performance monitoring and insights (Phase 3C depth):
+- **System KPIs** with live conflict/delay hints from operations feed
+- **KPI trends** — 5-minute bucketed snapshots from `/analytics/trends`
+- **Station delay heatmap** — per-station delay intensity over recent buckets
+- **Delay analysis** by station and train type; platform utilization; conflict breakdown
 
 ### 5. AI ChatBot
 

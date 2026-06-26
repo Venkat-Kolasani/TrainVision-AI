@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Home,
   BarChart3,
@@ -24,10 +24,9 @@ import { RecommendationsPanel } from './components/operations/RecommendationsPan
 import { SkipLink } from './components/layout/SkipLink';
 import { notify } from './lib/notify';
 import { useDashboardShell } from './context/DashboardShellContext';
+import { useOperationsFeed } from './context/OperationsFeedContext';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useCommandCenter } from './hooks/useCommandCenter';
-import { getConflictCount } from './lib/apiNormalize';
-import type { Recommendation, ConflictsResponse, ConflictItem } from './types/railway';
 
 type DashboardView = 'main' | 'simulation' | 'analytics';
 
@@ -40,86 +39,22 @@ const healthStyles = {
 const AppWithDashboards: React.FC = () => {
   const { status, actions } = useDashboardShell();
   const commandCenter = useCommandCenter();
+  const {
+    recommendations,
+    conflictCount,
+    logs,
+    schedule,
+    refreshAll,
+  } = useOperationsFeed();
   const [currentView, setCurrentView] = useState<DashboardView>('main');
   const [showChatBot, setShowChatBot] = useState(false);
-  const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [showRecommendationsPanel, setShowRecommendationsPanel] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [applyingRecId, setApplyingRecId] = useState<string | null>(null);
-  const [shellConflicts, setShellConflicts] = useState<ConflictsResponse>({});
-
-  const [scheduleData, setScheduleData] = useState<unknown>(null);
-  const [logs, setLogs] = useState<unknown[]>([]);
 
   const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void fetchConflicts();
-      void fetchRecommendations();
-      void fetchScheduleData();
-      void fetchLogs();
-    }, 10000);
-
-    void fetchConflicts();
-    void fetchRecommendations();
-    void fetchScheduleData();
-    void fetchLogs();
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchConflicts = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/conflicts`);
-      if (response.ok) {
-        const data: ConflictsResponse = await response.json();
-        setShellConflicts(data);
-        setConflicts(data.conflicts || []);
-      }
-    } catch (error) {
-      console.error('Error fetching conflicts:', error);
-    }
-  };
-
-  const fetchRecommendations = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/recommendations`);
-      if (response.ok) {
-        const data = await response.json();
-        setRecommendations(data);
-      }
-    } catch (error) {
-      console.error('Error fetching recommendations:', error);
-    }
-  };
-
-  const fetchScheduleData = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/schedule`);
-      if (response.ok) {
-        const data = await response.json();
-        setScheduleData(data);
-      }
-    } catch (error) {
-      console.error('Error fetching schedule data:', error);
-    }
-  };
-
-  const fetchLogs = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/log`);
-      if (response.ok) {
-        const data = await response.json();
-        setLogs(data);
-      }
-    } catch (error) {
-      console.error('Error fetching logs:', error);
-    }
-  };
 
   const applyRecommendation = async (recommendationId: string) => {
     setApplyingRecId(recommendationId);
@@ -130,7 +65,7 @@ const AppWithDashboards: React.FC = () => {
       );
 
       if (response.ok) {
-        await Promise.all([fetchRecommendations(), fetchConflicts(), fetchScheduleData()]);
+        await refreshAll(true);
         if (actions?.refreshAll) await actions.refreshAll();
         notify.success('Recommendation applied successfully');
       } else {
@@ -187,7 +122,7 @@ const AppWithDashboards: React.FC = () => {
     },
   });
 
-  const shellConflictCount = getConflictCount(shellConflicts);
+  const shellConflictCount = conflictCount;
 
   const lastSyncLabel = status.lastSync
     ? status.lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -241,11 +176,11 @@ const AppWithDashboards: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {(shellConflictCount > 0 || conflicts.length > 0) && (
+            {(shellConflictCount > 0) && (
               <div className="flex items-center gap-2 rounded border border-danger/40 bg-danger/10 px-3 py-1.5" role="status">
                 <AlertTriangle className="h-4 w-4 text-danger" aria-hidden />
                 <span className="text-sm text-danger">
-                  {Math.max(shellConflictCount, conflicts.length)} conflicts
+                  {shellConflictCount} conflicts
                 </span>
               </div>
             )}
@@ -363,9 +298,9 @@ const AppWithDashboards: React.FC = () => {
       {showChatBot && (
         <ChatBot
           onClose={() => setShowChatBot(false)}
-          logsBefore={logs as never[]}
-          logsAfter={logs as never[]}
-          scheduleData={scheduleData as never}
+          logsBefore={logs}
+          logsAfter={logs}
+          scheduleData={{ schedule, delays_before_min: [], delays_after_min: [] }}
           lastAction={null}
           autoExplain={false}
         />

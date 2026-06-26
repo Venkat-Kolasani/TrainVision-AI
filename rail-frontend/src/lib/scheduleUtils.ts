@@ -24,7 +24,12 @@ export function isOverriddenEntry(entry: ScheduleEntry) {
   return reason.includes('fixed to p') || reason.includes('override');
 }
 
-export function getTrainStatus(entry: ScheduleEntry, trains: Train[]): TrainStatus {
+export function getTrainStatus(
+  entry: ScheduleEntry,
+  trains: Train[],
+  conflictTrainIds?: Set<string>
+): TrainStatus {
+  if (conflictTrainIds?.has(entry.train_id)) return 'conflict';
   if (isOverriddenEntry(entry)) return 'overridden';
   if (isDelayedEntry(entry, trains)) return 'delayed';
   return 'on-time';

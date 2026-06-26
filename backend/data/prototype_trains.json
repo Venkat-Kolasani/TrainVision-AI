@@ -1,9 +1,37 @@
 {
   "stations": [
-    { "id": "HYB", "platforms": 3 },
-    { "id": "SC", "platforms": 4 },
-    { "id": "KCG", "platforms": 2 }
+    {
+      "id": "HYB",
+      "platforms": 3,
+      "station_name": "Hyderabad Deccan",
+      "latitude": 17.385,
+      "longitude": 78.4867,
+      "is_junction": true
+    },
+    {
+      "id": "SC",
+      "platforms": 4,
+      "station_name": "Secunderabad Junction",
+      "latitude": 17.4399,
+      "longitude": 78.5017,
+      "is_junction": true
+    },
+    {
+      "id": "KCG",
+      "platforms": 2,
+      "station_name": "Kacheguda",
+      "latitude": 17.3753,
+      "longitude": 78.4983,
+      "is_junction": true
+    }
   ],
+  "train_legs": {
+    "T104": ["HYB", "SC", "KCG"],
+    "T107": ["HYB", "SC", "KCG"],
+    "T110": ["KCG", "SC", "HYB"],
+    "T113": ["HYB", "SC"],
+    "T115": ["SC", "KCG", "HYB"]
+  },
   "trains": [
     {
       "id": "T101",
@@ -63,6 +91,96 @@
       "destination": "SC",
       "scheduled_arrival": "2025-09-22T09:10:00",
       "scheduled_departure": "2025-09-22T09:25:00",
+      "platform_pref": 1
+    },
+    {
+      "id": "T107",
+      "type": "Express",
+      "priority": 7,
+      "origin": "HYB",
+      "destination": "KCG",
+      "scheduled_arrival": "2025-09-22T09:12:00",
+      "scheduled_departure": "2025-09-22T09:28:00",
+      "platform_pref": 2
+    },
+    {
+      "id": "T108",
+      "type": "Local",
+      "priority": 3,
+      "origin": "SC",
+      "destination": "HYB",
+      "scheduled_arrival": "2025-09-22T09:18:00",
+      "scheduled_departure": "2025-09-22T09:32:00",
+      "platform_pref": 1
+    },
+    {
+      "id": "T109",
+      "type": "Intercity",
+      "priority": 6,
+      "origin": "KCG",
+      "destination": "SC",
+      "scheduled_arrival": "2025-09-22T09:08:00",
+      "scheduled_departure": "2025-09-22T09:22:00",
+      "platform_pref": 1
+    },
+    {
+      "id": "T110",
+      "type": "Express",
+      "priority": 8,
+      "origin": "KCG",
+      "destination": "HYB",
+      "scheduled_arrival": "2025-09-22T09:25:00",
+      "scheduled_departure": "2025-09-22T09:40:00",
+      "platform_pref": 1
+    },
+    {
+      "id": "T111",
+      "type": "Passenger",
+      "priority": 5,
+      "origin": "HYB",
+      "destination": "SC",
+      "scheduled_arrival": "2025-09-22T09:22:00",
+      "scheduled_departure": "2025-09-22T09:38:00",
+      "platform_pref": 2
+    },
+    {
+      "id": "T112",
+      "type": "Freight",
+      "priority": 1,
+      "origin": "SC",
+      "destination": "KCG",
+      "scheduled_arrival": "2025-09-22T09:28:00",
+      "scheduled_departure": "2025-09-22T09:55:00",
+      "platform_pref": 3
+    },
+    {
+      "id": "T113",
+      "type": "Express",
+      "priority": 9,
+      "origin": "HYB",
+      "destination": "SC",
+      "scheduled_arrival": "2025-09-22T09:30:00",
+      "scheduled_departure": "2025-09-22T09:45:00",
+      "platform_pref": 1
+    },
+    {
+      "id": "T114",
+      "type": "Local",
+      "priority": 4,
+      "origin": "KCG",
+      "destination": "SC",
+      "scheduled_arrival": "2025-09-22T09:35:00",
+      "scheduled_departure": "2025-09-22T09:50:00",
+      "platform_pref": 2
+    },
+    {
+      "id": "T115",
+      "type": "Intercity",
+      "priority": 7,
+      "origin": "SC",
+      "destination": "HYB",
+      "scheduled_arrival": "2025-09-22T09:40:00",
+      "scheduled_departure": "2025-09-22T09:55:00",
       "platform_pref": 1
     }
   ]

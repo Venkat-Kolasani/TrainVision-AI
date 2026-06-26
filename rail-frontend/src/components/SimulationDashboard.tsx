@@ -2,12 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { Play, AlertTriangle, TrendingUp, TrendingDown, Minus, Clock, Train, Zap, X } from 'lucide-react';
 import { ConflictTestingPanel } from './ConflictTestingPanel';
 import { SimulationDiagnostics } from './operations/SimulationDiagnostics';
+import { TrainGraph } from './operations/TrainGraph';
 import { PageHeader } from './layout/PageHeader';
 import { EmptyState } from './layout/EmptyState';
 import { SectionCard } from './layout/SectionCard';
 import { Button } from './ui/Button';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { notify } from '../lib/notify';
 import { PRODUCT_COPY } from '../lib/productCopy';
+import { useOperationsFeed } from '../context/OperationsFeedContext';
+import type { ScheduleEntry } from '../types/railway';
+
+function scheduleRowChanged(entry: ScheduleEntry, baseline: ScheduleEntry[]) {
+  const base = baseline.find(
+    (x) => x.train_id === entry.train_id && x.station_id === entry.station_id
+  );
+  if (!base) return true;
+  return (
+    base.assigned_platform !== entry.assigned_platform ||
+    base.actual_arrival !== entry.actual_arrival ||
+    base.actual_departure !== entry.actual_departure
+  );
+}
 
 interface SimulationScenario {
   scenario_id: string;
@@ -32,44 +48,27 @@ interface SimulationRequest {
 }
 
 const SimulationDashboard: React.FC = () => {
+  const { trains, stations, schedule, refreshAll } = useOperationsFeed();
+  const currentSchedule = schedule;
+
   const [scenarios, setScenarios] = useState<Record<string, any>>({});
   const [activeScenario, setActiveScenario] = useState<SimulationScenario | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [trains, setTrains] = useState<any[]>([]);
-  const [stations, setStations] = useState<any[]>([]);
-  const [currentSchedule, setCurrentSchedule] = useState<any[]>([]);
+  const [selectedEntryPreview, setSelectedEntryPreview] = useState<ScheduleEntry | null>(null);
   
   // Simulation form state
   const [scenarioType, setScenarioType] = useState<'delay' | 'priority' | 'breakdown' | 'weather'>('delay');
   const [selectedTrain, setSelectedTrain] = useState<string>('');
   const [delayMinutes, setDelayMinutes] = useState<number>(15);
   const [selectedStation, setSelectedStation] = useState<string>('');
+  const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
+  const [compareScenarioId, setCompareScenarioId] = useState<string | null>(null);
 
   const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   useEffect(() => {
-    fetchInitialData();
-    fetchScenarios();
+    void fetchScenarios();
   }, []);
-
-  const fetchInitialData = async () => {
-    try {
-      const [trainsRes, stationsRes, scheduleRes] = await Promise.all([
-        fetch(`${API_BASE}/trains`),
-        fetch(`${API_BASE}/stations`),
-        fetch(`${API_BASE}/schedule`)
-      ]);
-
-      if (trainsRes.ok) setTrains(await trainsRes.json());
-      if (stationsRes.ok) setStations(await stationsRes.json());
-      if (scheduleRes.ok) {
-        const scheduleData = await scheduleRes.json();
-        setCurrentSchedule(scheduleData.schedule);
-      }
-    } catch (error) {
-      console.error('Error fetching initial data:', error);
-    }
-  };
 
   const fetchScenarios = async () => {
     try {
@@ -135,6 +134,36 @@ const SimulationDashboard: React.FC = () => {
       console.error('Error deleting scenario:', error);
     }
   };
+
+  const promoteToLive = async () => {
+    if (!activeScenario?.recommendations?.length) {
+      notify.warning('No recommendations to promote from this scenario');
+      return;
+    }
+    const rec = activeScenario.recommendations[0];
+    try {
+      const response = await fetch(
+        `${API_BASE}/apply-recommendation?recommendation_id=${encodeURIComponent(rec.id)}`,
+        { method: 'POST' }
+      );
+      if (response.ok) {
+        notify.success('Scenario recommendation promoted to live schedule');
+        await refreshAll();
+      } else {
+        const err = await response.json().catch(() => ({}));
+        notify.error('Promote failed', err.detail || 'Unknown error');
+      }
+    } catch {
+      notify.error('Promote failed');
+    } finally {
+      setShowPromoteConfirm(false);
+    }
+  };
+
+  const compareScenario =
+    compareScenarioId && scenarios[compareScenarioId]
+      ? { ...scenarios[compareScenarioId], scenario_id: compareScenarioId }
+      : null;
 
   const getScenarioIcon = (type: string) => {
     switch (type) {
@@ -465,9 +494,152 @@ const SimulationDashboard: React.FC = () => {
                   </div>
                 )}
 
+                {/* Side-by-side scenario KPI compare */}
+                {compareScenario && (
+                  <div className="bg-slate-800 rounded-lg p-6">
+                    <h2 className="text-xl font-semibold mb-4">Active vs compare scenario</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <h3 className="text-sm font-medium text-blue-400 mb-3">Active scenario</h3>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-slate-700 rounded p-3 text-sm">
+                            <div className="text-slate-400">Delay Δ</div>
+                            <div className="font-mono text-lg">
+                              {activeScenario.kpi_delta.total_delay_change.toFixed(1)}m
+                            </div>
+                          </div>
+                          <div className="bg-slate-700 rounded p-3 text-sm">
+                            <div className="text-slate-400">Conflicts Δ</div>
+                            <div className="font-mono text-lg">
+                              {activeScenario.kpi_delta.conflicts_change}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-amber-400 mb-3">Compare scenario</h3>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-slate-700 rounded p-3 text-sm">
+                            <div className="text-slate-400">Delay Δ</div>
+                            <div className="font-mono text-lg">
+                              {(compareScenario.kpi_delta?.total_delay_change ?? 0).toFixed(1)}m
+                            </div>
+                          </div>
+                          <div className="bg-slate-700 rounded p-3 text-sm">
+                            <div className="text-slate-400">Conflicts Δ</div>
+                            <div className="font-mono text-lg">
+                              {compareScenario.kpi_delta?.conflicts_change ?? 0}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Train graph preview */}
+                <div className="bg-slate-800 rounded-lg p-6">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-xl font-semibold">Occupation preview</h2>
+                    {activeScenario.recommendations.length > 0 && (
+                      <Button variant="primary" onClick={() => setShowPromoteConfirm(true)}>
+                        Promote to live
+                      </Button>
+                    )}
+                  </div>
+                  {compareScenario?.predicted_schedule ? (
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <div>
+                        <p className="mb-2 text-xs text-blue-400">Active scenario</p>
+                        <TrainGraph
+                          baselineEntries={currentSchedule}
+                          actualEntries={activeScenario.predicted_schedule}
+                          stations={stations}
+                          trains={trains}
+                          conflicts={activeScenario.conflicts_after}
+                          now={new Date()}
+                          onEntryClick={setSelectedEntryPreview}
+                        />
+                      </div>
+                      <div>
+                        <p className="mb-2 text-xs text-amber-400">Compare scenario</p>
+                        <TrainGraph
+                          baselineEntries={currentSchedule}
+                          actualEntries={compareScenario.predicted_schedule}
+                          stations={stations}
+                          trains={trains}
+                          conflicts={[]}
+                          now={new Date()}
+                          onEntryClick={setSelectedEntryPreview}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <TrainGraph
+                      baselineEntries={currentSchedule}
+                      actualEntries={activeScenario.predicted_schedule}
+                      stations={stations}
+                      trains={trains}
+                      conflicts={activeScenario.conflicts_after}
+                      now={new Date()}
+                      onEntryClick={setSelectedEntryPreview}
+                    />
+                  )}
+                  {selectedEntryPreview && (
+                    <div className="mt-4 rounded border border-slate-600 bg-slate-900/60 p-3 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono font-medium text-white">
+                          {selectedEntryPreview.train_id} @ {selectedEntryPreview.station_id} P
+                          {selectedEntryPreview.assigned_platform}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-slate-400 hover:text-white"
+                          onClick={() => setSelectedEntryPreview(null)}
+                          aria-label="Close preview"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <p className="mt-1 text-slate-400">{selectedEntryPreview.reason}</p>
+                    </div>
+                  )}
+                  {Object.keys(scenarios).length > 1 && (
+                    <div className="mt-4">
+                      <label className="text-xs text-slate-400">Compare with scenario</label>
+                      <select
+                        className="mt-1 w-full rounded border border-slate-600 bg-slate-900 px-2 py-1 text-sm"
+                        value={compareScenarioId ?? ''}
+                        onChange={(e) => setCompareScenarioId(e.target.value || null)}
+                      >
+                        <option value="">None</option>
+                        {Object.entries(scenarios)
+                          .filter(([id]) => id !== activeScenario.scenario_id)
+                          .map(([id, sc]) => (
+                            <option key={id} value={id}>
+                              {sc.request?.scenario_type} — {sc.request?.train_id || 'all'}
+                            </option>
+                          ))}
+                      </select>
+                      {compareScenario && (
+                        <p className="mt-2 text-xs text-slate-400">
+                          Compare delay delta:{' '}
+                          <span className="font-mono text-white">
+                            {(
+                              (compareScenario.kpi_delta?.total_delay_change ?? 0) -
+                              activeScenario.kpi_delta.total_delay_change
+                            ).toFixed(1)}
+                            m
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Schedule Preview */}
                 <div className="bg-slate-800 rounded-lg p-6">
-                  <h2 className="text-xl font-semibold mb-4">Predicted Schedule Preview</h2>
+                  <h2 className="text-xl font-semibold mb-4">Full schedule diff ({activeScenario.predicted_schedule.length} legs)</h2>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="text-slate-400 border-b border-slate-600">
@@ -481,8 +653,13 @@ const SimulationDashboard: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {activeScenario.predicted_schedule.slice(0, 10).map((entry: any, idx: number) => (
-                          <tr key={idx} className="border-b border-slate-700">
+                        {activeScenario.predicted_schedule.map((entry: ScheduleEntry, idx: number) => {
+                          const changed = scheduleRowChanged(entry, currentSchedule);
+                          return (
+                          <tr
+                            key={idx}
+                            className={`border-b border-slate-700 ${changed ? 'bg-amber-500/10' : ''}`}
+                          >
                             <td className="py-2 font-medium">{entry.train_id}</td>
                             <td className="py-2">{entry.station_id}</td>
                             <td className="py-2">P{entry.assigned_platform}</td>
@@ -490,14 +667,10 @@ const SimulationDashboard: React.FC = () => {
                             <td className="py-2">{new Date(entry.actual_departure).toLocaleTimeString()}</td>
                             <td className="py-2 text-xs text-slate-400">{entry.reason}</td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
-                    {activeScenario.predicted_schedule.length > 10 && (
-                      <div className="text-center text-slate-400 py-2">
-                        ... and {activeScenario.predicted_schedule.length - 10} more entries
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -526,15 +699,32 @@ const SimulationDashboard: React.FC = () => {
           </div>
         </div>
 
-        <SimulationDiagnostics trains={trains} onRefresh={fetchInitialData} />
+        <SimulationDiagnostics
+          trains={trains}
+          onRefresh={async () => {
+            await refreshAll();
+          }}
+        />
 
         <div className="mt-8">
           <ConflictTestingPanel
             trains={trains}
             apiBase={API_BASE}
-            onDataRefresh={fetchInitialData}
+            onDataRefresh={async () => {
+              await refreshAll();
+            }}
           />
         </div>
+
+      <ConfirmDialog
+        open={showPromoteConfirm}
+        title="Promote scenario to live?"
+        message="This applies the top simulation recommendation to the live schedule via the standard override API. Confirm only if you intend to change production state."
+        confirmLabel="Promote to live"
+        variant="warning"
+        onConfirm={() => void promoteToLive()}
+        onCancel={() => setShowPromoteConfirm(false)}
+      />
       </div>
     </div>
   );
